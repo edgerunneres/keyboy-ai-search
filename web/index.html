@@ -1,0 +1,92 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>KeyBoy 智能专业搜索引擎</title>
+    <link rel="stylesheet" href="/style.css" />
+  </head>
+  <body>
+    <main class="shell">
+      <aside class="side-panel">
+        <div class="brand">
+          <div class="brand-mark">K</div>
+          <div>
+            <h1>KeyBoy</h1>
+            <p>专业领域智能搜索</p>
+          </div>
+        </div>
+
+        <section class="panel">
+          <h2>知识库</h2>
+          <div class="metric-grid">
+            <div><span id="docCount">-</span><small>文档</small></div>
+            <div><span id="vocabCount">-</span><small>词项</small></div>
+          </div>
+          <label for="sourceFilter">来源</label>
+          <select id="sourceFilter"></select>
+          <label for="categoryFilter">主题</label>
+          <select id="categoryFilter"></select>
+        </section>
+
+        <section class="panel">
+          <h2>演示查询</h2>
+          <button class="example" data-query="混合检索 BM25 RRF">混合检索 BM25 RRF</button>
+          <button class="example" data-query="如何提升课程设计搜索准确率">如何提升搜索准确率</button>
+          <button class="example" data-query="爬虫合规 robots 频率控制">爬虫合规策略</button>
+        </section>
+      </aside>
+
+      <section class="workspace">
+        <header class="topbar">
+          <div>
+            <h2>检索工作台</h2>
+            <p id="statusText">正在初始化检索引擎...</p>
+          </div>
+          <div class="mode-switch" role="group" aria-label="检索模式">
+            <button class="active" data-mode="hybrid">Hybrid</button>
+            <button data-mode="lexical">BM25</button>
+            <button data-mode="semantic">Semantic</button>
+          </div>
+        </header>
+
+        <form id="searchForm" class="searchbar">
+          <input id="queryInput" autocomplete="off" value="混合检索 BM25 RRF 为什么比 TF-IDF 更强" />
+          <button type="submit">搜索</button>
+        </form>
+
+        <section class="answer-panel">
+          <div class="answer-head">
+            <h2>智能摘要</h2>
+            <span id="latencyBadge">- ms</span>
+          </div>
+          <p id="summaryText">输入查询后生成摘要。</p>
+          <ul id="insightList"></ul>
+        </section>
+
+        <section class="results-head">
+          <h2>搜索结果</h2>
+          <span id="resultCount">0 条</span>
+        </section>
+        <section id="results" class="results"></section>
+      </section>
+
+      <aside class="right-panel">
+        <section class="panel">
+          <h2>查询画像</h2>
+          <dl id="profileList"></dl>
+        </section>
+        <section class="panel">
+          <h2>Agent Trace</h2>
+          <div id="traceList" class="trace-list"></div>
+        </section>
+        <section class="panel">
+          <h2>质量指标</h2>
+          <dl id="qualityList"></dl>
+        </section>
+      </aside>
+    </main>
+    <script src="/app.js"></script>
+  </body>
+</html>
+

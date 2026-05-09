@@ -1,0 +1,147 @@
+[
+  {
+    "title": "混合检索架构：BM25 与轻量语义向量的互补",
+    "content": "现代专业搜索系统不再依赖单一 TF-IDF。BM25 能稳定处理精确关键词、技术缩写和标题命中，语义向量能够覆盖同义表达、长问题和概念相近内容。KeyBoy 采用双通道召回：词法通道负责精确匹配，语义通道负责概念召回，再使用 RRF 融合排序降低单一路径误判。课程验收时可以对比 lexical、semantic、hybrid 三种模式，说明混合检索在召回率和鲁棒性上的优势。",
+    "url": "local://keyboy/hybrid-retrieval",
+    "source": "KeyBoy Research",
+    "published_at": "2026-05-01",
+    "category": "检索算法",
+    "tags": ["BM25", "RRF", "语义检索", "混合检索"]
+  },
+  {
+    "title": "RRF 融合排序：让多个排序器稳定协作",
+    "content": "Reciprocal Rank Fusion 的核心思想是使用排名位置而不是原始分数做融合，避免不同检索器分数尺度不一致的问题。KeyBoy 将 BM25 排名和语义向量排名分别转换为倒数排名分，再按查询意图动态调整权重。短关键词和技术术语更偏向 BM25，长问句和解释型问题更偏向语义召回。该策略比简单加权分数更稳定，也便于在文档中解释设计依据。",
+    "url": "local://keyboy/rrf-ranking",
+    "source": "KeyBoy Research",
+    "published_at": "2026-05-02",
+    "category": "检索算法",
+    "tags": ["RRF", "融合排序", "相关性"]
+  },
+  {
+    "title": "多智能体流水线：从爬取到洞察的工程化协同",
+    "content": "KeyBoy 将原计划中的四个智能体扩展为六个角色：CrawlAgent 负责合规采集，CleanAgent 负责清洗去重，IndexAgent 负责构建索引，SearchAgent 负责检索排序，InsightAgent 负责摘要和洞察，EvalAgent 负责离线评测。每个智能体输出可追踪的执行状态和耗时，前端展示 Agent Trace，让教师能够直观看到系统不是简单页面，而是完整的数据处理流水线。",
+    "url": "local://keyboy/agents",
+    "source": "KeyBoy Architecture",
+    "published_at": "2026-05-03",
+    "category": "系统架构",
+    "tags": ["多智能体", "流水线", "可观测"]
+  },
+  {
+    "title": "定向爬虫合规策略：robots、频率控制与公开内容边界",
+    "content": "课程设计中的爬虫必须强调合法合规。KeyBoy 的爬虫模块默认检查 robots.txt，使用清晰的 User-Agent，限制请求超时和抓取间隔，只处理 text/html 页面，不抓取登录态、个人隐私、付费内容和敏感数据。演示版内置本地语料，真实爬取作为可选能力，这样既能展示工程能力，也能避免验收现场受网络波动影响。",
+    "url": "local://keyboy/crawler-compliance",
+    "source": "KeyBoy Architecture",
+    "published_at": "2026-05-03",
+    "category": "爬虫与合规",
+    "tags": ["爬虫", "robots", "合规", "公开数据"]
+  },
+  {
+    "title": "可解释搜索：把黑盒结果变成可验收证据",
+    "content": "普通搜索项目只能给出结果列表，很难证明排序为什么合理。KeyBoy 为每条结果展示 BM25 分、语义分、RRF 融合分和重排分，并用自然语言解释命中原因，例如关键词匹配强、语义相似度高、标题命中核心词。可解释性让教师可以快速验证算法逻辑，也能体现软件工程中的可测试性和可维护性。",
+    "url": "local://keyboy/explainable-search",
+    "source": "KeyBoy UX",
+    "published_at": "2026-05-04",
+    "category": "用户体验",
+    "tags": ["可解释", "评分", "验收"]
+  },
+  {
+    "title": "智能摘要设计：抽取式总结比直接生成更适合课程验收",
+    "content": "KeyBoy 使用抽取式摘要，从 Top-K 搜索结果中挑选覆盖查询词、位置靠前、来源多样的句子组合成答案。相比直接生成，抽取式摘要更可控，不会编造不存在的信息，并且每个句子都保留来源标识。课程设计场景中，这种方式成本低、稳定性高、可解释强，非常适合单机运行和现场演示。",
+    "url": "local://keyboy/extractive-summary",
+    "source": "KeyBoy UX",
+    "published_at": "2026-05-04",
+    "category": "智能摘要",
+    "tags": ["摘要", "可控生成", "来源"]
+  },
+  {
+    "title": "检索评测：用 Recall@5 和 nDCG@5 证明搜索质量",
+    "content": "优秀的搜索引擎课程设计不能只说结果准确，需要提供可复现实验。KeyBoy 内置评测集，每个查询配置相关文档标题，EvalAgent 自动计算 Recall@5、nDCG@5 和平均耗时。Recall@5 衡量相关文档是否被召回，nDCG@5 衡量相关文档是否排在前面。这个闭环能把软件工程质量保证从人工主观评价提升到可量化评价。",
+    "url": "local://keyboy/evaluation",
+    "source": "KeyBoy QA",
+    "published_at": "2026-05-05",
+    "category": "质量保证",
+    "tags": ["nDCG", "Recall", "自动评测", "质量保证"]
+  },
+  {
+    "title": "前端搜索工作台：面向验收的结果、摘要和指标同屏展示",
+    "content": "KeyBoy 前端不是简单搜索框，而是专业检索工作台。左侧展示语料规模、数据来源、查询样例和过滤条件，中间展示搜索结果、摘要、模式切换和响应时间，右侧展示查询画像、Agent Trace 与评测指标。这样的信息架构使老师可以在几分钟内理解系统价值、算法能力和工程完整度。",
+    "url": "local://keyboy/search-workbench",
+    "source": "KeyBoy UX",
+    "published_at": "2026-05-05",
+    "category": "用户体验",
+    "tags": ["前端", "工作台", "验收演示"]
+  },
+  {
+    "title": "软件工程文档升级：从计划书到可追踪交付包",
+    "content": "原始开发计划书已经覆盖目标、分工和进度，但缺少算法迭代、质量度量、接口说明和验收证据。增强版课程设计增加迭代说明、系统设计说明、API 设计、测试方案、运行说明和评测结果。文档不再只描述想做什么，而是能证明已经做成什么、为什么这样设计、如何复现验收。",
+    "url": "local://keyboy/docs-upgrade",
+    "source": "KeyBoy Delivery",
+    "published_at": "2026-05-06",
+    "category": "软件工程",
+    "tags": ["文档", "GB/T 8567", "交付"]
+  },
+  {
+    "title": "本地部署策略：零数据库、零云服务、可复制演示",
+    "content": "课程设计最怕验收现场部署失败。KeyBoy 核心采用 Python 标准库实现，知识库使用 JSON，服务使用内置 HTTP Server，前端使用原生 HTML、CSS、JavaScript。没有数据库、没有云服务、没有复杂构建链。系统仍然保留清晰分层，后续可以平滑替换为 FastAPI、SQLite、Elasticsearch 或向量数据库。",
+    "url": "local://keyboy/local-deploy",
+    "source": "KeyBoy Delivery",
+    "published_at": "2026-05-06",
+    "category": "部署运维",
+    "tags": ["本地部署", "标准库", "演示稳定"]
+  },
+  {
+    "title": "查询意图自适应：短词精确，长问句语义",
+    "content": "同一个搜索引擎需要同时处理短关键词和自然语言问题。KeyBoy 会分析查询长度、是否包含疑问表达、是否包含技术缩写，再调整 BM25 与语义通道权重。例如输入 RRF、BM25、API 时优先保证精确命中；输入如何提升搜索准确率时，系统提高语义召回权重，找到混合检索、重排和评测相关资料。",
+    "url": "local://keyboy/query-profile",
+    "source": "KeyBoy Research",
+    "published_at": "2026-05-07",
+    "category": "检索算法",
+    "tags": ["查询意图", "BM25", "语义检索"]
+  },
+  {
+    "title": "二阶段重排：标题覆盖、内容覆盖与新鲜度",
+    "content": "KeyBoy 在 RRF 召回后执行轻量二阶段重排。重排考虑标题是否命中核心词、正文是否覆盖多个查询词、资料发布时间是否较新。这样可以避免语义上相近但主题偏离的结果排在最前，也能让课程设计资料、系统架构和检索算法等核心内容在对应查询中更靠前。",
+    "url": "local://keyboy/rerank",
+    "source": "KeyBoy Research",
+    "published_at": "2026-05-07",
+    "category": "检索算法",
+    "tags": ["重排", "标题覆盖", "新鲜度"]
+  },
+  {
+    "title": "质量保证闭环：单元测试、接口测试和性能预算",
+    "content": "软件工程课程设计必须体现质量管理。KeyBoy 使用 unittest 覆盖语料加载、混合检索、语义检索、摘要生成和评测指标。前端通过 health、search、metrics 三个接口读取后端状态。性能预算设置为本地 1000 篇文档内查询小于 3 秒，当前演示语料通常在毫秒级完成，为后续扩容留出余量。",
+    "url": "local://keyboy/testing",
+    "source": "KeyBoy QA",
+    "published_at": "2026-05-08",
+    "category": "质量保证",
+    "tags": ["测试", "性能", "接口"]
+  },
+  {
+    "title": "配置管理与团队协作：从共享文件到可追溯版本",
+    "content": "KeyBoy 建议将源代码、文档、语料、评测集、截图和演示脚本全部纳入版本管理。团队分工可以对应 Agent、前端、测试、文档和演示五条责任线。每次迭代记录修改目标、影响模块、验证方式和遗留问题，避免课程设计后期出现文件混乱、版本不一致和无法复现的情况。",
+    "url": "local://keyboy/config-management",
+    "source": "KeyBoy Delivery",
+    "published_at": "2026-05-08",
+    "category": "软件工程",
+    "tags": ["配置管理", "团队协作", "迭代记录"]
+  },
+  {
+    "title": "专业领域扩展：软件工程、AI 与信息检索知识库",
+    "content": "原计划限定 3 到 5 个专业网站，增强版建议采用专业领域主题包。每个主题包包含来源配置、清洗规则、评测查询和展示样例。当前演示主题是软件工程、人工智能和信息检索，后续可以扩展为法律、医学、考研资料或企业知识库。主题包机制使课程项目从一次性脚本升级为可扩展软件产品。",
+    "url": "local://keyboy/domain-pack",
+    "source": "KeyBoy Architecture",
+    "published_at": "2026-05-08",
+    "category": "系统架构",
+    "tags": ["专业领域", "主题包", "扩展性"]
+  },
+  {
+    "title": "验收演示脚本：用三个查询展示系统上限",
+    "content": "建议现场演示使用三个查询。第一，搜索 BM25 RRF，展示精确技术词与评分解释。第二，搜索 如何提升课程设计搜索准确率，展示语义召回、摘要和洞察。第三，搜索 爬虫合规与 robots，展示定向爬取的安全边界。最后打开指标区展示 Recall@5、nDCG@5 和响应时间，证明系统具有完整工程闭环。",
+    "url": "local://keyboy/demo-script",
+    "source": "KeyBoy Delivery",
+    "published_at": "2026-05-09",
+    "category": "验收演示",
+    "tags": ["演示", "验收", "满分策略"]
+  }
+]
+
