@@ -1,8 +1,10 @@
 import unittest
+from unittest.mock import patch
 
 from keyboy.agentic import AgenticKeyBoySystem
 from keyboy.agents import KeyBoySystem
 from keyboy.evaluator import evaluate
+from keyboy.llm import LLMProvider
 from keyboy.storage import load_eval_queries
 
 
@@ -42,6 +44,23 @@ class KeyBoyTest(unittest.TestCase):
         self.assertIn("ResearchPlannerAgent", [trace.name for trace in result.traces])
         self.assertIn("CriticAgent", [trace.name for trace in result.traces])
         self.assertFalse(result.metrics["llm_used"])
+
+    def test_dashscope_defaults(self):
+        with patch.dict(
+            "os.environ",
+            {
+                "DASHSCOPE_API_KEY": "test-only",
+                "KEYBOY_LLM_BASE_URL": "",
+                "KEYBOY_LLM_MODEL": "",
+                "KEYBOY_LLM_API_KEY": "",
+                "OPENAI_API_KEY": "",
+            },
+            clear=False,
+        ):
+            provider = LLMProvider()
+            self.assertEqual(provider.base_url, "https://dashscope.aliyuncs.com/compatible-mode/v1")
+            self.assertEqual(provider.model, "qwen3.6-max-preview")
+            self.assertTrue(provider.enabled)
 
 
 if __name__ == "__main__":

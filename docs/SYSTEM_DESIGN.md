@@ -56,6 +56,15 @@ $env:KEYBOY_LLM_MODEL="你的模型名"
 
 没有 API Key 时，系统会自动进入 deterministic fallback：规划和摘要由本地规则完成，CriticAgent 会明确提示“未检测到真实 LLM”。这样既能课堂稳定演示，又不会伪装成已经调用大模型。
 
+### 百炼 / 通义千问默认配置
+
+如果设置 `DASHSCOPE_API_KEY`，系统会自动切换到阿里云百炼 OpenAI 兼容接口：
+
+- Base URL: `https://dashscope.aliyuncs.com/compatible-mode/v1`
+- 默认模型：`qwen3.6-max-preview`
+
+该默认模型可通过 `KEYBOY_LLM_MODEL` 覆盖。若更看重稳定生产能力、超长上下文和完整工具能力，可切换为 `qwen3.6-plus`。API Key 不应写入源码、文档或 Git 提交，只在本机环境变量中设置。
+
 ## 6. 在线数据源
 
 | 数据源 | 作用 | 特点 |
@@ -118,4 +127,3 @@ python -m unittest discover -s tests
 - 引入浏览器/网页阅读 Agent，支持普通网页深度阅读。
 - 引入 LLM-as-a-judge 和多模型交叉验证。
 - 增加任务队列和持久化缓存，支撑更大规模在线研究。
-

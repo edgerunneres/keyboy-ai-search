@@ -31,14 +31,35 @@ class LLMProvider:
     """
 
     def __init__(self) -> None:
-        self.api_key = os.getenv("KEYBOY_LLM_API_KEY") or os.getenv("OPENAI_API_KEY") or ""
-        self.base_url = os.getenv("KEYBOY_LLM_BASE_URL", "https://api.openai.com/v1").rstrip("/")
-        self.model = os.getenv("KEYBOY_LLM_MODEL", "openai-compatible-model")
+        self.api_key = (
+            os.getenv("KEYBOY_LLM_API_KEY")
+            or os.getenv("DASHSCOPE_API_KEY")
+            or os.getenv("OPENAI_API_KEY")
+            or ""
+        )
+        self.base_url = self._default_base_url().rstrip("/")
+        self.model = self._default_model()
         self.timeout = float(os.getenv("KEYBOY_LLM_TIMEOUT", "35"))
 
     @property
     def enabled(self) -> bool:
         return bool(self.api_key and self.model != "openai-compatible-model")
+
+    @staticmethod
+    def _default_base_url() -> str:
+        if os.getenv("KEYBOY_LLM_BASE_URL"):
+            return os.getenv("KEYBOY_LLM_BASE_URL", "")
+        if os.getenv("DASHSCOPE_API_KEY"):
+            return "https://dashscope.aliyuncs.com/compatible-mode/v1"
+        return "https://api.openai.com/v1"
+
+    @staticmethod
+    def _default_model() -> str:
+        if os.getenv("KEYBOY_LLM_MODEL"):
+            return os.getenv("KEYBOY_LLM_MODEL", "")
+        if os.getenv("DASHSCOPE_API_KEY"):
+            return "qwen3.6-max-preview"
+        return "openai-compatible-model"
 
     def chat(self, messages: list[dict[str, str]], *, temperature: float = 0.2, max_tokens: int = 1200) -> LLMResult:
         if not self.enabled:
@@ -55,6 +76,8 @@ class LLMProvider:
             "temperature": temperature,
             "max_tokens": max_tokens,
         }
+        if os.getenv("KEYBOY_LLM_ENABLE_THINKING"):
+            payload["enable_thinking"] = os.getenv("KEYBOY_LLM_ENABLE_THINKING", "").lower() not in {"0", "false", "no"}
         data = json.dumps(payload, ensure_ascii=False).encode("utf-8")
         request = urllib.request.Request(
             f"{self.base_url}/chat/completions",
@@ -94,4 +117,3 @@ class LLMProvider:
         except json.JSONDecodeError:
             pass
         return fallback, result
-

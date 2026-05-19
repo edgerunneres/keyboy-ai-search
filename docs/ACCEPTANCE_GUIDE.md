@@ -20,6 +20,15 @@ $env:KEYBOY_LLM_MODEL="你的模型名"
 
 没有 API Key 也能演示，但系统会明确显示本地 fallback。这一点在答辩时要说明：我们没有伪装调用大模型，而是做了真实可接入的 LLM Provider。
 
+### 使用百炼平台
+
+```powershell
+$env:DASHSCOPE_API_KEY="你的百炼 API Key"
+python -m keyboy.app --host 127.0.0.1 --port 8787
+```
+
+设置 `DASHSCOPE_API_KEY` 后，系统默认使用百炼 OpenAI 兼容接口和 `qwen3.6-max-preview`。如果更看重稳定生产能力、超长上下文和完整工具能力，可以手动切换到 `qwen3.6-plus`。不要把 API Key 写进仓库。
+
 ## 3. 推荐演示查询
 
 ### 查询一
@@ -67,4 +76,3 @@ $env:KEYBOY_LLM_MODEL="你的模型名"
 - 是否有引用和证据。
 - 是否有 CriticAgent 校验风险。
 - 是否有清晰架构文档和测试。
-

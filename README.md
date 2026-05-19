@@ -27,6 +27,34 @@ $env:KEYBOY_LLM_MODEL="你的模型名"
 python -m keyboy.app --host 127.0.0.1 --port 8787
 ```
 
+### 使用阿里云百炼 / 通义千问
+
+百炼平台兼容 OpenAI Chat Completions。只需要设置 `DASHSCOPE_API_KEY`，系统会自动使用：
+
+- Base URL: `https://dashscope.aliyuncs.com/compatible-mode/v1`
+- 默认模型：`qwen3.6-max-preview`
+
+```powershell
+$env:DASHSCOPE_API_KEY="你的百炼 API Key"
+python -m keyboy.app --host 127.0.0.1 --port 8787
+```
+
+如需手动指定模型：
+
+```powershell
+$env:DASHSCOPE_API_KEY="你的百炼 API Key"
+$env:KEYBOY_LLM_MODEL="qwen3.6-max-preview"
+python -m keyboy.app --host 127.0.0.1 --port 8787
+```
+
+如果你更看重稳定生产能力、超长上下文和完整工具能力，也可以把 `KEYBOY_LLM_MODEL` 改为 `qwen3.6-plus`。
+
+也可以使用安全启动脚本，避免把 Key 写进命令历史：
+
+```powershell
+powershell -ExecutionPolicy Bypass -File tools/start_bailian.ps1
+```
+
 ## 亮点
 
 - Agentic Research：规划、在线发现、清洗、索引、证据排序、合成、批判校验全流程。

@@ -122,7 +122,7 @@ def build() -> None:
         ("项目名称", "KeyBoy LLM 多智能体在线研究系统"),
         ("版本定位", "KeyBoy 3.0 / Agentic Deep Research 原型"),
         ("核心目标", "从本地搜索升级为可接入真实大模型的在线多智能体系统"),
-        ("技术路线", "Agentic RAG、OpenAI-compatible LLM、OpenAlex/arXiv 等在线源、BM25+语义排序、Critic 校验"),
+        ("技术路线", "Agentic RAG、百炼/Qwen3.6、OpenAlex/arXiv 等在线源、BM25+语义排序、Critic 校验"),
         ("交付内容", "源代码、前端、在线源适配器、LLM Provider、系统设计、迭代说明、验收指南"),
     ]
     for idx, (key, value) in enumerate(rows):
@@ -191,7 +191,7 @@ def build() -> None:
     add_heading(doc, "4. 运行与验收")
     add_body(doc, "运行命令：python -m keyboy.app --host 127.0.0.1 --port 8787", "运行命令：")
     add_body(doc, "访问地址：http://127.0.0.1:8787", "访问地址：")
-    add_body(doc, "真实模型配置：设置 KEYBOY_LLM_API_KEY、KEYBOY_LLM_BASE_URL、KEYBOY_LLM_MODEL 后启用远程 LLM。", "真实模型配置：")
+    add_body(doc, "真实模型配置：设置 DASHSCOPE_API_KEY 后默认启用百炼 OpenAI 兼容接口和 qwen3.6-max-preview。", "真实模型配置：")
     add_bullets(
         doc,
         [

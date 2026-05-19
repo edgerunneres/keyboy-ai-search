@@ -43,6 +43,15 @@ $env:KEYBOY_LLM_MODEL="你的模型名"
 
 没有 API Key 时，系统自动 fallback，并在前端和 API 返回中标明 `llm_used=false`。
 
+### 百炼平台适配
+
+新增对 `DASHSCOPE_API_KEY` 的原生识别。设置后默认：
+
+- `KEYBOY_LLM_BASE_URL=https://dashscope.aliyuncs.com/compatible-mode/v1`
+- `KEYBOY_LLM_MODEL=qwen3.6-max-preview`
+
+这样可以直接接入通义千问当前最强模型，同时避免把密钥写入代码或文档。
+
 ## 6. 前沿参考
 
 - GraphRAG: From Local to Global, Microsoft Research, 2024。
@@ -57,4 +66,3 @@ $env:KEYBOY_LLM_MODEL="你的模型名"
 - 当前在线源聚焦开放学术数据，不直接调用商业搜索引擎。
 - 图谱能力已在设计中预留，但尚未实现完整实体图和社区摘要。
 - 本地 fallback 是演示稳定性的保障，不代表最终形态。
-
