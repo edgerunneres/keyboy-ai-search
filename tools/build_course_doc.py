@@ -101,7 +101,7 @@ def build() -> None:
     title = doc.add_paragraph()
     title.alignment = WD_ALIGN_PARAGRAPH.CENTER
     title.paragraph_format.space_before = Pt(80)
-    run = title.add_run("KeyBoy 搜索引擎课程设计增强版说明")
+    run = title.add_run("KeyBoy 3.0 LLM 多智能体在线研究系统说明")
     run.font.name = "Microsoft YaHei"
     run._element.rPr.rFonts.set(qn("w:eastAsia"), "Microsoft YaHei")
     run.font.size = Pt(24)
@@ -111,7 +111,7 @@ def build() -> None:
     subtitle = doc.add_paragraph()
     subtitle.alignment = WD_ALIGN_PARAGRAPH.CENTER
     subtitle.paragraph_format.space_after = Pt(18)
-    run = subtitle.add_run("定向爬取 + 多智能体 + 混合检索 + 可解释评测")
+    run = subtitle.add_run("Agentic RAG + 在线开放数据源 + LLM 证据合成 + Critic 校验")
     run.font.name = "Microsoft YaHei"
     run._element.rPr.rFonts.set(qn("w:eastAsia"), "Microsoft YaHei")
     run.font.size = Pt(14)
@@ -119,11 +119,11 @@ def build() -> None:
 
     meta = doc.add_table(rows=5, cols=2)
     rows = [
-        ("项目名称", "KeyBoy 专业领域智能搜索引擎"),
-        ("版本定位", "课程设计增强版 / 可运行演示版"),
-        ("核心目标", "以现代搜索系统能力提升课程设计完成度与验收表现"),
-        ("技术路线", "Python 标准库、BM25、语义向量、RRF、抽取式摘要、unittest"),
-        ("交付内容", "源代码、前端、语料、评测集、迭代说明、系统设计、验收指南"),
+        ("项目名称", "KeyBoy LLM 多智能体在线研究系统"),
+        ("版本定位", "KeyBoy 3.0 / Agentic Deep Research 原型"),
+        ("核心目标", "从本地搜索升级为可接入真实大模型的在线多智能体系统"),
+        ("技术路线", "Agentic RAG、OpenAI-compatible LLM、OpenAlex/arXiv 等在线源、BM25+语义排序、Critic 校验"),
+        ("交付内容", "源代码、前端、在线源适配器、LLM Provider、系统设计、迭代说明、验收指南"),
     ]
     for idx, (key, value) in enumerate(rows):
         set_cell_text(meta.cell(idx, 0), key, bold=True)
@@ -134,21 +134,21 @@ def build() -> None:
 
     doc.add_page_break()
 
-    add_heading(doc, "1. 修改迭代总览")
+    add_heading(doc, "1. 架构重构总览")
     add_body(
         doc,
-        "本增强版在原开发计划书基础上保留课程设计的可控边界，同时重点补强算法先进性、工程可运行性、验收可展示性和质量可证明性。原方案以定向爬取、TF-IDF、本地 JSON 和简单前端为主；增强版升级为多智能体搜索工作台，能展示混合检索、智能摘要、可解释评分和自动评测闭环。",
+        "KeyBoy 3.0 不再定位为本地小型搜索引擎，而是升级为 LLM 多智能体在线研究系统。系统采用 Agentic RAG / Deep Research 思路，将复杂问题拆解为规划、在线发现、证据索引、排序、合成和批判校验等步骤；有 API Key 时调用真实大模型，没有 API Key 时进入可解释 fallback。",
     )
     table = doc.add_table(rows=1, cols=3)
     headers = ["维度", "原计划", "增强版迭代"]
     for idx, header in enumerate(headers):
         set_cell_text(table.cell(0, idx), header, bold=True)
     diff_rows = [
-        ("检索算法", "倒排索引 + TF-IDF", "BM25 + 轻量语义向量 + RRF 融合 + 二阶段重排"),
-        ("智能体", "爬取、清洗、索引、搜索四类", "新增 InsightAgent 与 EvalAgent，形成摘要和评测闭环"),
-        ("前端", "搜索框与结果列表", "结果、摘要、过滤、评分解释、Agent Trace、质量指标同屏展示"),
-        ("质量保证", "人工测试为主", "unittest + Recall@5 + nDCG@5 + 平均耗时"),
-        ("部署", "依赖若干 Python 库", "核心功能仅需 Python 标准库，演示更稳定"),
+        ("数据来源", "本地 JSON 小语料", "OpenAlex、Semantic Scholar、arXiv、Crossref 在线源 + 本地兜底"),
+        ("智能体", "爬取、清洗、索引、搜索四类", "ResearchPlanner、OnlineDiscovery、EvidenceRanker、Synthesis、Critic"),
+        ("大模型", "未接入真实模型", "OpenAI-compatible Chat Completions，可接入任意兼容模型"),
+        ("输出", "搜索结果与摘要", "研究计划、在线证据、引用答案、风险校验、Agent Trace"),
+        ("架构", "本地检索原型", "Agentic RAG / Deep Research 工作流"),
     ]
     for row in diff_rows:
         cells = table.add_row().cells
@@ -160,12 +160,12 @@ def build() -> None:
     add_bullets(
         doc,
         [
-            "混合检索：BM25 处理精确关键词，语义向量覆盖同义表达和长问题。",
-            "RRF 融合：使用排名位置融合多个检索器，规避分数尺度不一致。",
-            "查询画像：根据问题意图、技术词和长度动态调整词法/语义权重。",
-            "可解释排序：每条结果展示 BM25、语义、RRF、重排分数和命中原因。",
-            "可评测质量：内置测试查询，自动输出 Recall@5、nDCG@5 和平均耗时。",
-            "稳定演示：内置本地语料，同时保留合规爬虫扩展能力。",
+            "Agentic RAG：将研究问题拆解为规划、搜索、阅读、合成、批判多个阶段。",
+            "在线开放数据源：接入 OpenAlex、Semantic Scholar、arXiv、Crossref。",
+            "真实 LLM 接口：通过环境变量接入 OpenAI-compatible 大模型。",
+            "证据引用：答案输出引用、来源、URL、时间和证据摘录。",
+            "Critic 校验：检查是否使用真实模型、证据数量和来源多样性。",
+            "稳定演示：没有 API Key 或网络受限时仍可用本地 fallback 运行。",
         ],
     )
 
@@ -174,12 +174,13 @@ def build() -> None:
     for idx, header in enumerate(["智能体", "职责", "验收价值"]):
         set_cell_text(arch.cell(0, idx), header, bold=True)
     arch_rows = [
-        ("CrawlAgent", "加载本地语料，可选合规网页抓取", "规避现场网络波动，保留扩展能力"),
+        ("ResearchPlannerAgent", "理解问题、拆分子查询、选择在线源", "体现真实大模型 Agent 规划能力"),
+        ("OnlineDiscoveryAgent", "访问 OpenAlex、Semantic Scholar、arXiv、Crossref", "不再局限本地小数据库"),
         ("CleanAgent", "清洗、去重、过滤低质量文本", "保证知识库质量"),
         ("IndexAgent", "构建 BM25 与语义向量索引", "体现搜索核心技术"),
-        ("SearchAgent", "执行检索、融合、重排与解释", "展示系统智能程度"),
-        ("InsightAgent", "生成查询摘要和洞察", "提升结果可读性"),
-        ("EvalAgent", "计算 Recall@5、nDCG@5、耗时", "形成可证明质量闭环"),
+        ("EvidenceRankerAgent", "排序在线证据，选择高相关资料", "提升答案证据质量"),
+        ("SynthesisAgent", "调用 LLM 或 fallback 生成带引用答案", "输出研究报告式答案"),
+        ("CriticAgent", "检查模型状态、证据数量与来源多样性", "提升可信度"),
     ]
     for row in arch_rows:
         cells = arch.add_row().cells
@@ -190,14 +191,14 @@ def build() -> None:
     add_heading(doc, "4. 运行与验收")
     add_body(doc, "运行命令：python -m keyboy.app --host 127.0.0.1 --port 8787", "运行命令：")
     add_body(doc, "访问地址：http://127.0.0.1:8787", "访问地址：")
+    add_body(doc, "真实模型配置：设置 KEYBOY_LLM_API_KEY、KEYBOY_LLM_BASE_URL、KEYBOY_LLM_MODEL 后启用远程 LLM。", "真实模型配置：")
     add_bullets(
         doc,
         [
-            "查询“混合检索 BM25 RRF”，展示精确技术词、RRF 融合与评分解释。",
-            "查询“如何提升课程设计搜索准确率”，展示自然语言查询、语义召回和摘要。",
-            "查询“爬虫合规 robots 频率控制”，展示合规设计和工程风险控制。",
-            "切换 Hybrid、BM25、Semantic 三种模式，直观看到算法差异。",
-            "打开右侧质量指标，展示 Recall@5、nDCG@5 和平均耗时。",
+            "查询“Agentic RAG GraphRAG LightRAG Self-RAG 最新研究怎么整合到课程项目”。",
+            "展示 ResearchPlannerAgent 的子查询、OnlineDiscoveryAgent 的在线资料、SynthesisAgent 的答案。",
+            "说明没有 API Key 时系统会明确显示 fallback，不伪装大模型调用。",
+            "展示 CriticAgent 对证据不足、来源单一、未启用模型等风险的提示。",
         ],
     )
 
@@ -206,10 +207,10 @@ def build() -> None:
     for idx, header in enumerate(["测试项", "结果", "说明", "验收意义"]):
         set_cell_text(result.cell(0, idx), header, bold=True)
     result_rows = [
-        ("单元测试", "4/4 通过", "覆盖索引、搜索、摘要、评测", "代码可复现"),
-        ("Recall@5", "0.90", "相关文档召回能力强", "证明结果不漏关键信息"),
-        ("nDCG@5", "0.8493", "相关文档排序靠前", "证明排序质量"),
-        ("平均耗时", "毫秒级", "本地演示语料快速响应", "满足小于 3 秒目标"),
+        ("单元测试", "5/5 通过", "覆盖本地搜索与 Agentic Research 离线管线", "代码可复现"),
+        ("在线源", "4 类", "OpenAlex、Semantic Scholar、arXiv、Crossref", "支撑在线大数据获取"),
+        ("LLM 接口", "OpenAI-compatible", "通过环境变量配置模型服务", "可接入真实大模型"),
+        ("Critic 校验", "已实现", "检查模型状态、证据数量、来源多样性", "提升可信度"),
     ]
     for row in result_rows:
         cells = result.add_row().cells
@@ -220,17 +221,17 @@ def build() -> None:
     add_heading(doc, "6. 推荐答辩表述")
     add_body(
         doc,
-        "我们没有停留在最初的 TF-IDF 搜索，而是参考现代搜索系统，把 KeyBoy 做成了混合检索工作台。系统同时支持 BM25、语义向量和 RRF 融合排序，并且每条结果都有可解释分数。多智能体流水线覆盖采集、清洗、索引、搜索、摘要和评测，前端能展示 Agent Trace、查询画像和质量指标。因此项目不仅能运行，还能解释为什么这样设计、如何证明质量、如何继续扩展。",
+        "我们没有停留在本地 TF-IDF 搜索，而是把 KeyBoy 重构为 Agentic RAG / Deep Research 系统。现在它具备研究规划、在线开放数据源获取、证据排序、LLM 合成、引用输出和 Critic 风险校验。没有 API Key 时系统会明确进入 fallback，不会伪装调用大模型；有 API Key 时可接入任意 OpenAI-compatible 模型。这个架构已经从课程演示原型走向真实前沿系统的雏形。",
     )
 
     add_heading(doc, "7. 参考经验")
     add_bullets(
         doc,
         [
-            "Elasticsearch RRF 文档：多个相关性指标可以通过倒数排名融合为单一结果集。",
-            "OpenSearch Hybrid Search：关键词检索与神经/语义检索可结合并进行分数处理。",
-            "Faiss 文档：向量相似度检索是现代语义搜索的重要基础。",
-            "BEIR 检索评测论文：搜索质量需要用统一基准、Recall、nDCG 等指标验证。",
+            "GraphRAG：从局部片段检索扩展到全局图谱 sensemaking。",
+            "LightRAG：以轻量图结构提升 RAG 效率和上下文关联。",
+            "Self-RAG：生成过程加入检索决策和自我批判。",
+            "AutoGen / LangGraph：多智能体编排和可观测执行轨迹。",
         ],
     )
 

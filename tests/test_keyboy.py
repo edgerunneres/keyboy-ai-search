@@ -1,5 +1,6 @@
 import unittest
 
+from keyboy.agentic import AgenticKeyBoySystem
 from keyboy.agents import KeyBoySystem
 from keyboy.evaluator import evaluate
 from keyboy.storage import load_eval_queries
@@ -33,7 +34,15 @@ class KeyBoyTest(unittest.TestCase):
         self.assertGreaterEqual(metrics["recall_at_5"], 0.7)
         self.assertGreaterEqual(metrics["ndcg_at_5"], 0.6)
 
+    def test_agentic_research_offline_pipeline(self):
+        agentic = AgenticKeyBoySystem()
+        result = agentic.research("GraphRAG LightRAG Agentic RAG 如何整合", online=False, include_local=True, limit=5)
+        self.assertTrue(result.answer)
+        self.assertGreaterEqual(result.metrics["indexed_documents"], 10)
+        self.assertIn("ResearchPlannerAgent", [trace.name for trace in result.traces])
+        self.assertIn("CriticAgent", [trace.name for trace in result.traces])
+        self.assertFalse(result.metrics["llm_used"])
+
 
 if __name__ == "__main__":
     unittest.main()
-

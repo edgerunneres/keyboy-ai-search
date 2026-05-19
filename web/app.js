@@ -1,5 +1,5 @@
 const state = {
-  mode: "hybrid",
+  mode: "research",
   health: null,
 };
 
@@ -31,41 +31,25 @@ function dl(container, pairs) {
   });
 }
 
-function scorePart(label, value) {
-  const width = Math.max(0, Math.min(100, value));
-  return `
-    <div class="score-part">
-      <div class="score-label"><span>${label}</span><strong>${value.toFixed(0)}</strong></div>
-      <div class="bar"><span style="width:${width}%"></span></div>
-    </div>
-  `;
-}
-
-function renderResults(hits) {
-  $("#resultCount").textContent = `${hits.length} 条`;
-  if (!hits.length) {
-    $("#results").innerHTML = `<div class="empty">没有匹配结果</div>`;
+function renderCitations(citations) {
+  $("#resultCount").textContent = `${citations.length} 条`;
+  if (!citations.length) {
+    $("#results").innerHTML = `<div class="empty">没有获得证据来源</div>`;
     return;
   }
-  $("#results").innerHTML = hits
-    .map((hit) => {
-      const doc = hit.document;
-      const parts = hit.score_parts;
+
+  $("#results").innerHTML = citations
+    .map((item) => {
+      const url = item.url || "#";
       return `
         <article class="result-card">
           <div class="result-title">
-            <h3>${doc.title}</h3>
-            <div class="score">${hit.score.toFixed(1)}</div>
+            <h3>[${item.id}] ${item.title}</h3>
+            <div class="score">${Number(item.score || 0).toFixed(1)}</div>
           </div>
-          <div class="meta">${doc.source} · ${doc.category} · ${doc.published_at}</div>
-          <p class="snippet">${hit.snippet}</p>
-          <div class="score-bars">
-            ${scorePart("BM25", parts.bm25)}
-            ${scorePart("语义", parts.semantic)}
-            ${scorePart("RRF", parts.rrf)}
-            ${scorePart("重排", parts.rerank)}
-          </div>
-          <div class="explain">命中解释：${hit.explanation}。关键词：${hit.matched_terms.slice(0, 8).join("、") || "综合相关"}</div>
+          <div class="meta">${item.source} · ${item.published_at || "未知日期"}</div>
+          <p class="snippet">${item.evidence || "暂无摘要。"}</p>
+          <a class="citation-link" href="${url}" target="_blank" rel="noreferrer">打开来源</a>
         </article>
       `;
     })
@@ -85,42 +69,105 @@ function renderTrace(traces) {
     .join("");
 }
 
-function renderQuality(payload) {
-  const evalMetrics = payload.metrics?.evaluation || state.health?.evaluation || {};
+function renderRisks(risks) {
+  $("#riskList").innerHTML = (risks || [])
+    .map((risk) => `<div class="risk-item">${risk}</div>`)
+    .join("");
+}
+
+function renderResearch(payload) {
+  $("#statusText").textContent = `当前模式：${state.mode === "local" ? "本地证据" : "在线 Agentic Research"}`;
+  $("#latencyBadge").textContent = `${payload.metrics.latency_ms} ms`;
+  $("#summaryText").textContent = payload.answer;
+  $("#insightList").innerHTML = payload.findings.map((item) => `<li>${item}</li>`).join("");
+  renderCitations(payload.citations);
+  renderTrace(payload.traces);
+  renderRisks(payload.risks);
+
+  const plan = payload.plan || {};
+  dl($("#profileList"), [
+    ["意图", plan.intent || "-"],
+    ["LLM 规划", plan.llm_used ? "已启用" : "本地规划"],
+    ["子查询", (plan.subqueries || []).join(" | ")],
+    ["在线源", (plan.source_plan || []).join("、")],
+    ["证据要求", (plan.required_evidence || []).join("、")],
+  ]);
+
+  const metrics = payload.metrics || {};
   dl($("#qualityList"), [
-    ["Recall@5", evalMetrics.recall_at_5 ?? "-"],
-    ["nDCG@5", evalMetrics.ndcg_at_5 ?? "-"],
-    ["评测查询", evalMetrics.cases ?? "-"],
-    ["平均耗时", `${evalMetrics.avg_latency_ms ?? "-"} ms`],
+    ["LLM 状态", metrics.llm_used ? "远程模型" : "本地 fallback"],
+    ["模型", metrics.llm_model || "-"],
+    ["在线文档", metrics.online_documents ?? "-"],
+    ["索引文档", metrics.indexed_documents ?? "-"],
+    ["结果数量", metrics.result_count ?? "-"],
   ]);
 }
 
-async function search() {
+async function research() {
+  const query = $("#queryInput").value.trim();
+  if (!query) return;
+  const online = state.mode !== "local" && $("#onlineToggle").checked;
+  const params = new URLSearchParams({
+    q: query,
+    online: online ? "true" : "false",
+    include_local: "true",
+    limit: "10",
+  });
+  $("#statusText").textContent = online ? "正在规划并访问在线研究源..." : "正在使用本地证据运行...";
+  const response = await fetch(`/api/research?${params}`);
+  const payload = await response.json();
+  renderResearch(payload);
+}
+
+async function classicSearch() {
   const params = new URLSearchParams({
     q: $("#queryInput").value.trim(),
-    mode: state.mode,
+    mode: "hybrid",
     source: $("#sourceFilter").value,
     category: $("#categoryFilter").value,
     limit: "8",
   });
-  $("#statusText").textContent = "正在检索...";
   const response = await fetch(`/api/search?${params}`);
   const payload = await response.json();
-  $("#statusText").textContent = `当前模式：${payload.mode}`;
-  $("#latencyBadge").textContent = `${payload.metrics.latency_ms} ms`;
-  $("#summaryText").textContent = payload.summary;
-  $("#insightList").innerHTML = payload.insights.map((item) => `<li>${item}</li>`).join("");
-  renderResults(payload.hits);
-  renderTrace(payload.traces);
-  renderQuality(payload);
-  const profile = payload.query_profile || {};
-  dl($("#profileList"), [
-    ["词项数", profile.token_count ?? 0],
-    ["问题意图", profile.has_question_intent ? "是" : "否"],
-    ["BM25 权重", profile.lexical_weight ?? "-"],
-    ["语义权重", profile.semantic_weight ?? "-"],
-    ["命中词", (profile.tokens || []).slice(0, 10).join("、")],
-  ]);
+  renderResearch({
+    query: payload.query,
+    answer: payload.summary,
+    plan: {
+      intent: "传统混合检索",
+      llm_used: false,
+      subqueries: [payload.query],
+      source_plan: ["local"],
+      required_evidence: ["本地知识库"],
+    },
+    citations: payload.hits.map((hit, index) => ({
+      id: index + 1,
+      title: hit.document.title,
+      source: hit.document.source,
+      url: hit.document.url,
+      published_at: hit.document.published_at,
+      score: hit.score,
+      evidence: hit.snippet.replaceAll("<mark>", "").replaceAll("</mark>", ""),
+    })),
+    findings: payload.insights,
+    risks: ["当前为兼容旧版本的本地混合检索链路。"],
+    metrics: {
+      latency_ms: payload.metrics.latency_ms,
+      llm_used: false,
+      llm_model: "none",
+      online_documents: 0,
+      indexed_documents: payload.metrics.index.documents,
+      result_count: payload.hits.length,
+    },
+    traces: payload.traces,
+  });
+}
+
+function runCurrentMode() {
+  if (state.mode === "search") {
+    classicSearch();
+  } else {
+    research();
+  }
 }
 
 async function loadHealth() {
@@ -131,13 +178,12 @@ async function loadHealth() {
   $("#vocabCount").textContent = stats.vocabulary;
   optionList($("#sourceFilter"), stats.sources, "全部来源");
   optionList($("#categoryFilter"), stats.categories, "全部主题");
-  $("#statusText").textContent = "索引已就绪";
-  renderQuality({ metrics: { evaluation: state.health.evaluation } });
+  $("#statusText").textContent = "多智能体研究系统已就绪";
 }
 
 $("#searchForm").addEventListener("submit", (event) => {
   event.preventDefault();
-  search();
+  runCurrentMode();
 });
 
 $$(".mode-switch button").forEach((button) => {
@@ -145,21 +191,22 @@ $$(".mode-switch button").forEach((button) => {
     $$(".mode-switch button").forEach((item) => item.classList.remove("active"));
     button.classList.add("active");
     state.mode = button.dataset.mode;
-    search();
+    runCurrentMode();
   });
 });
 
 $$(".example").forEach((button) => {
   button.addEventListener("click", () => {
     $("#queryInput").value = button.dataset.query;
-    search();
+    runCurrentMode();
   });
 });
 
-$("#sourceFilter").addEventListener("change", search);
-$("#categoryFilter").addEventListener("change", search);
+$("#sourceFilter").addEventListener("change", runCurrentMode);
+$("#categoryFilter").addEventListener("change", runCurrentMode);
+$("#onlineToggle").addEventListener("change", runCurrentMode);
 
-loadHealth().then(search).catch((error) => {
+loadHealth().then(runCurrentMode).catch((error) => {
   $("#statusText").textContent = `初始化失败：${error}`;
 });
 

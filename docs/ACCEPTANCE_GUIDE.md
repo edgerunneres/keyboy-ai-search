@@ -1,6 +1,6 @@
-# KeyBoy 验收演示指南
+# KeyBoy 3.0 验收演示指南
 
-## 1. 启动系统
+## 1. 启动
 
 ```powershell
 python -m keyboy.app --host 127.0.0.1 --port 8787
@@ -8,61 +8,63 @@ python -m keyboy.app --host 127.0.0.1 --port 8787
 
 打开 `http://127.0.0.1:8787`。
 
-## 2. 推荐演示顺序
+## 2. 启用真实大模型
 
-### 查询一：混合检索 BM25 RRF
+如果已经有大模型 API Key，先设置：
 
-展示重点：
+```powershell
+$env:KEYBOY_LLM_API_KEY="你的 API Key"
+$env:KEYBOY_LLM_BASE_URL="https://api.openai.com/v1"
+$env:KEYBOY_LLM_MODEL="你的模型名"
+```
 
-- 技术词精确匹配。
-- BM25、语义、RRF、重排四类分数。
-- Hybrid、BM25、Semantic 三种模式切换对比。
+没有 API Key 也能演示，但系统会明确显示本地 fallback。这一点在答辩时要说明：我们没有伪装调用大模型，而是做了真实可接入的 LLM Provider。
 
-讲解要点：原计划中的 TF-IDF 已升级为 BM25；系统不是简单关键词搜索，而是融合词法与语义召回。
+## 3. 推荐演示查询
 
-### 查询二：如何提升课程设计搜索准确率
+### 查询一
 
-展示重点：
-
-- 长问句触发更高语义权重。
-- 智能摘要整合多个来源。
-- 查询画像显示系统如何理解输入。
-
-讲解要点：系统具备查询意图自适应能力，可以处理自然语言问题。
-
-### 查询三：爬虫合规 robots 频率控制
+`Agentic RAG GraphRAG LightRAG Self-RAG 最新研究怎么整合到课程项目`
 
 展示重点：
 
-- 搜到合规爬虫策略。
-- 说明系统默认使用本地语料确保演示稳定，同时保留真实爬取扩展。
+- ResearchPlannerAgent 会拆解问题。
+- OnlineDiscoveryAgent 会访问开放研究源。
+- SynthesisAgent 输出研究答案。
+- CriticAgent 输出风险提示。
 
-讲解要点：工程设计考虑法律合规、反爬风险和验收现场稳定性。
+### 查询二
 
-## 3. 指标讲解
+`大模型多智能体在线研究系统应该如何设计`
 
-右侧质量指标区展示：
+展示重点：
 
-- Recall@5：相关资料是否被召回。
-- nDCG@5：相关资料是否排在前面。
-- 平均耗时：检索性能。
+- 系统不再是本地小数据库。
+- 前端显示在线文档数、索引文档数、LLM 状态和 Agent Trace。
+- 可以解释架构从本地搜索升级为 Deep Research。
 
-这部分用于证明系统质量不是主观判断，而是可复现实验。
+### 查询三
 
-## 4. 满分答辩表达
+`GraphRAG 和 LightRAG 相比普通 RAG 强在哪里`
 
-可以这样概括项目升级：
+展示重点：
 
-> 我们没有停留在最初的 TF-IDF 搜索，而是参考现代搜索系统，把 KeyBoy 做成了混合检索工作台。系统同时支持 BM25、语义向量和 RRF 融合排序，并且每条结果都有可解释分数。多智能体流水线覆盖采集、清洗、索引、搜索、摘要和评测，前端能展示 Agent Trace、查询画像和质量指标。这样既满足软件工程课程设计的过程要求，也能体现当前搜索系统的先进能力。
+- 说明 GraphRAG/LightRAG 的图结构思想。
+- 说明当前项目已经预留图谱扩展方向。
 
-## 5. 交付清单
+## 4. 答辩表述
 
-- 源代码：`keyboy/`
-- 前端：`web/`
-- 演示数据：`data/corpus.json`
-- 评测集：`data/eval_queries.json`
-- 迭代说明：`docs/ITERATION_LOG.md`
-- 系统设计：`docs/SYSTEM_DESIGN.md`
-- 验收指南：`docs/ACCEPTANCE_GUIDE.md`
-- 增强版说明文档：`KeyBoy搜索引擎课程设计增强版说明.docx`
+可以这样说：
+
+> 第一版只是本地搜索原型。我们后来发现真正前沿的方向是 Agentic RAG 和 Deep Research，所以把系统重构为 LLM 多智能体在线研究架构。现在系统包含 ResearchPlanner、OnlineDiscovery、EvidenceRanker、Synthesis、Critic 等智能体，能访问 OpenAlex、Semantic Scholar、arXiv、Crossref 等在线开放数据源，并通过 OpenAI-compatible 接口接入真实大模型。没有 API Key 时系统会进入本地 fallback 并明确提示，不会伪装模型调用。这个设计既保证课堂演示稳定，也具备继续扩展为真实前沿系统的架构基础。
+
+## 5. 验收看点
+
+- 是否能运行。
+- 是否有真实多智能体流程，而不是一个函数假装 Agent。
+- 是否能在线获取数据。
+- 是否能接入真实大模型。
+- 是否有引用和证据。
+- 是否有 CriticAgent 校验风险。
+- 是否有清晰架构文档和测试。
 

@@ -173,6 +173,20 @@ select {
   border-color: var(--teal);
 }
 
+.check-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 8px 0 12px;
+  color: var(--text);
+}
+
+.check-row input {
+  width: 18px;
+  height: 18px;
+  accent-color: var(--teal);
+}
+
 .workspace {
   display: flex;
   flex-direction: column;
@@ -319,6 +333,16 @@ select {
   margin: 0 0 12px;
 }
 
+.citation-link {
+  color: var(--blue);
+  text-decoration: none;
+  font-weight: 700;
+}
+
+.citation-link:hover {
+  text-decoration: underline;
+}
+
 mark {
   background: #f8e7b2;
   color: #4f3500;
@@ -403,6 +427,21 @@ dd {
   font-size: 12px;
 }
 
+.risk-list {
+  display: grid;
+  gap: 8px;
+  margin-top: 12px;
+}
+
+.risk-item {
+  border-left: 3px solid var(--amber);
+  background: #fff7df;
+  border-radius: 6px;
+  padding: 8px 10px;
+  font-size: 13px;
+  line-height: 1.45;
+}
+
 .empty {
   min-height: 160px;
   display: grid;
@@ -466,4 +505,3 @@ dd {
     grid-template-columns: 1fr 1fr;
   }
 }
-

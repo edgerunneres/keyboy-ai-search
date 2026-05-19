@@ -8,12 +8,14 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import parse_qs, urlparse
 
+from .agentic import AgenticKeyBoySystem
 from .agents import KeyBoySystem
 
 
 ROOT = Path(__file__).resolve().parents[1]
 WEB_ROOT = ROOT / "web"
 SYSTEM = KeyBoySystem()
+AGENTIC_SYSTEM = AgenticKeyBoySystem()
 
 
 class KeyBoyHandler(BaseHTTPRequestHandler):
@@ -73,6 +75,14 @@ class KeyBoyHandler(BaseHTTPRequestHandler):
             response = SYSTEM.search(q, mode=mode, source=source, category=category, limit=limit)
             self._json(response.to_dict())
             return
+        if parsed.path == "/api/research":
+            q = query.get("q", [""])[0]
+            online = query.get("online", ["true"])[0].lower() not in {"0", "false", "no"}
+            include_local = query.get("include_local", ["true"])[0].lower() not in {"0", "false", "no"}
+            limit = int(query.get("limit", ["10"])[0])
+            response = AGENTIC_SYSTEM.research(q, online=online, include_local=include_local, limit=limit)
+            self._json(response.to_dict())
+            return
         if parsed.path == "/api/metrics":
             SYSTEM.ensure_ready()
             assert SYSTEM.index is not None
@@ -94,4 +104,3 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
-

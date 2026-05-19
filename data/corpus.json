@@ -142,6 +142,41 @@
     "published_at": "2026-05-09",
     "category": "验收演示",
     "tags": ["演示", "验收", "满分策略"]
+  },
+  {
+    "title": "Agentic RAG：把 RAG 从检索模块升级为智能体工作流",
+    "content": "Agentic RAG 的核心不是简单向量库加大模型，而是在检索增强生成流程中加入规划、工具调用、源选择、阅读、批判和迭代。Planner 先拆解问题，Retriever 访问多个数据源，Reader 提取证据，Synthesizer 生成带引用答案，Critic 检查来源覆盖、事实风险和不确定性。它比传统 RAG 更适合复杂研究、课程答辩和在线大数据获取。",
+    "url": "local://keyboy/agentic-rag",
+    "source": "KeyBoy Frontier",
+    "published_at": "2026-05-19",
+    "category": "前沿架构",
+    "tags": ["Agentic RAG", "多智能体", "Deep Research", "LLM"]
+  },
+  {
+    "title": "GraphRAG 与 LightRAG：图结构增强的长文档研究系统",
+    "content": "GraphRAG 代表从局部片段搜索走向全局图谱总结的方向，适合回答主题、趋势、关系网络这类全局 sensemaking 问题。LightRAG 将图结构引入文本索引和检索流程，目标是在保持上下文意识的同时降低复杂度、提升检索效率。KeyBoy 新架构吸收这类思想，在线获取论文后先形成证据集合，再保留未来扩展实体图、社区摘要和图检索的接口。",
+    "url": "local://keyboy/graphrag-lightrag",
+    "source": "KeyBoy Frontier",
+    "published_at": "2026-05-19",
+    "category": "前沿架构",
+    "tags": ["GraphRAG", "LightRAG", "知识图谱", "RAG"]
+  },
+  {
+    "title": "Self-RAG 与 CriticAgent：让系统知道什么时候该检索、什么时候该怀疑",
+    "content": "Self-RAG 的关键启发是检索不应固定发生，而应该按需发生，并且生成后需要自我反思和批判。KeyBoy 新增 CriticAgent，检查是否使用真实 LLM、证据数量是否足够、来源是否多样、是否存在在线源失败。这样项目不再只是输出一个答案，而是输出答案、证据和风险，符合可信 AI 系统的设计方向。",
+    "url": "local://keyboy/self-rag-critic",
+    "source": "KeyBoy Frontier",
+    "published_at": "2026-05-19",
+    "category": "可信生成",
+    "tags": ["Self-RAG", "CriticAgent", "可信 AI", "反思"]
+  },
+  {
+    "title": "ManuSearch 与 Open Deep Research：透明可复现的深度研究 Agent",
+    "content": "最新开源 Deep Research 系统强调透明、模块化、可追踪。典型流程包括生成研究计划、拆分子任务、并行搜索、阅读网页或论文、压缩证据、合成报告和保留引用。KeyBoy 新版采用同类思想，但针对课程设计做轻量实现：无需复杂框架即可运行，同时支持 OpenAI-compatible 大模型配置，具备在线源、Agent Trace 和证据引用。",
+    "url": "local://keyboy/deep-research-agent",
+    "source": "KeyBoy Frontier",
+    "published_at": "2026-05-19",
+    "category": "前沿架构",
+    "tags": ["ManuSearch", "Open Deep Research", "LangGraph", "Agent Trace"]
   }
 ]
-
