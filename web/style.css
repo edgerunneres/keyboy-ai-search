@@ -47,6 +47,8 @@ select {
 .brand,
 .panel,
 .answer-panel,
+.decision-panel,
+.next-panel,
 .result-card {
   background: var(--surface);
   border: 1px solid var(--line);
@@ -258,6 +260,85 @@ select {
   padding: 18px;
 }
 
+.decision-panel,
+.next-panel {
+  border-radius: 8px;
+  padding: 18px;
+}
+
+.decision-panel {
+  display: grid;
+  gap: 14px;
+}
+
+.decision-block {
+  border-left: 4px solid var(--teal);
+  background: #f4fbf8;
+  border-radius: 6px;
+  padding: 12px 14px;
+}
+
+.decision-main {
+  border-left-color: var(--blue);
+  background: #f4f7ff;
+}
+
+.eyebrow {
+  display: block;
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 700;
+  margin-bottom: 6px;
+}
+
+.decision-block p {
+  margin: 0;
+  line-height: 1.65;
+  font-weight: 700;
+}
+
+.decision-columns {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 14px;
+}
+
+.decision-columns h2,
+.next-panel h2 {
+  margin: 0 0 10px;
+  font-size: 16px;
+  letter-spacing: 0;
+}
+
+.decision-columns ul {
+  margin: 0;
+  padding-left: 20px;
+  color: var(--muted);
+  line-height: 1.65;
+}
+
+.next-question-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.next-question {
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: #fff;
+  color: var(--text);
+  cursor: pointer;
+  min-height: 38px;
+  padding: 7px 10px;
+  text-align: left;
+}
+
+.next-question:hover {
+  border-color: var(--blue);
+  color: var(--blue);
+}
+
 .answer-head,
 .results-head {
   display: flex;
@@ -433,6 +514,53 @@ dd {
   margin-top: 12px;
 }
 
+.trust-box {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-height: 56px;
+  border-radius: 8px;
+  background: #eef8f6;
+  padding: 10px 12px;
+  margin-bottom: 12px;
+}
+
+.trust-box strong {
+  color: var(--teal);
+  font-size: 30px;
+  line-height: 1;
+}
+
+.trust-box span {
+  color: var(--muted);
+  font-weight: 700;
+}
+
+.signal-list {
+  display: grid;
+  gap: 8px;
+  margin-bottom: 12px;
+}
+
+.signal-item {
+  background: var(--surface-2);
+  border-radius: 6px;
+  padding: 8px;
+}
+
+.signal-head {
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+  font-size: 12px;
+  margin-bottom: 6px;
+}
+
+.signal-head span,
+.signal-item small {
+  color: var(--muted);
+}
+
 .risk-item {
   border-left: 3px solid var(--amber);
   background: #fff7df;
@@ -440,6 +568,62 @@ dd {
   padding: 8px 10px;
   font-size: 13px;
   line-height: 1.45;
+}
+
+.concept-cloud {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-bottom: 12px;
+}
+
+.concept-cloud span {
+  background: #eef3f3;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  color: var(--text);
+  font-size: 12px;
+  padding: 5px 9px;
+}
+
+.source-coverage,
+.frontier-list {
+  display: grid;
+  gap: 8px;
+}
+
+.source-coverage div,
+.frontier-item {
+  background: var(--surface-2);
+  border-radius: 6px;
+  padding: 9px 10px;
+}
+
+.source-coverage div {
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.source-coverage span,
+.frontier-item span,
+.frontier-item small {
+  color: var(--muted);
+}
+
+.frontier-item strong,
+.frontier-item span,
+.frontier-item small {
+  display: block;
+}
+
+.frontier-item span {
+  margin-top: 4px;
+  line-height: 1.45;
+}
+
+.frontier-item small {
+  margin-top: 5px;
 }
 
 .empty {
@@ -478,9 +662,15 @@ dd {
   .topbar,
   .answer-head,
   .results-head,
-  .result-title {
+  .result-title,
+  .decision-columns {
     align-items: stretch;
     flex-direction: column;
+  }
+
+  .decision-columns {
+    display: grid;
+    grid-template-columns: 1fr;
   }
 
   .mode-switch,

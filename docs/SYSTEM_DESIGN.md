@@ -61,9 +61,9 @@ $env:KEYBOY_LLM_MODEL="你的模型名"
 如果设置 `DASHSCOPE_API_KEY`，系统会自动切换到阿里云百炼 OpenAI 兼容接口：
 
 - Base URL: `https://dashscope.aliyuncs.com/compatible-mode/v1`
-- 默认模型：`qwen3.6-max-preview`
+- 默认模型：`qwen3.7-max`
 
-该默认模型可通过 `KEYBOY_LLM_MODEL` 覆盖。若更看重稳定生产能力、超长上下文和完整工具能力，可切换为 `qwen3.6-plus`。API Key 不应写入源码、文档或 Git 提交，只在本机环境变量中设置。
+该默认模型可通过 `KEYBOY_LLM_MODEL` 覆盖。若更看重稳定生产能力和成本控制，可切换为 `qwen3.6-plus`；若需要固定复现实验结果，可使用快照版本，例如 `qwen3.7-max-2026-05-20`。API Key 不应写入源码、文档或 Git 提交，只在本机环境变量中设置。
 
 ## 6. 在线数据源
 

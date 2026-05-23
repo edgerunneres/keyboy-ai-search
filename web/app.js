@@ -6,6 +6,15 @@ const state = {
 const $ = (selector) => document.querySelector(selector);
 const $$ = (selector) => Array.from(document.querySelectorAll(selector));
 
+function escapeHtml(value) {
+  return String(value ?? "")
+    .replaceAll("&", "&amp;")
+    .replaceAll("<", "&lt;")
+    .replaceAll(">", "&gt;")
+    .replaceAll('"', "&quot;")
+    .replaceAll("'", "&#039;");
+}
+
 function optionList(select, values, label) {
   select.innerHTML = "";
   const all = document.createElement("option");
@@ -44,12 +53,12 @@ function renderCitations(citations) {
       return `
         <article class="result-card">
           <div class="result-title">
-            <h3>[${item.id}] ${item.title}</h3>
+            <h3>[${escapeHtml(item.id)}] ${escapeHtml(item.title)}</h3>
             <div class="score">${Number(item.score || 0).toFixed(1)}</div>
           </div>
-          <div class="meta">${item.source} · ${item.published_at || "未知日期"}</div>
-          <p class="snippet">${item.evidence || "暂无摘要。"}</p>
-          <a class="citation-link" href="${url}" target="_blank" rel="noreferrer">打开来源</a>
+          <div class="meta">${escapeHtml(item.source)} · ${escapeHtml(item.published_at || "未知日期")}</div>
+          <p class="snippet">${escapeHtml(item.evidence || "暂无摘要。")}</p>
+          <a class="citation-link" href="${escapeHtml(url)}" target="_blank" rel="noreferrer">打开来源</a>
         </article>
       `;
     })
@@ -61,8 +70,8 @@ function renderTrace(traces) {
     .map(
       (trace) => `
         <div class="trace-item">
-          <strong>${trace.name} · ${trace.status}</strong>
-          <span>${trace.message} · ${trace.duration_ms.toFixed(2)} ms</span>
+          <strong>${escapeHtml(trace.name)} · ${escapeHtml(trace.status)}</strong>
+          <span>${escapeHtml(trace.message)} · ${trace.duration_ms.toFixed(2)} ms</span>
         </div>
       `
     )
@@ -71,18 +80,95 @@ function renderTrace(traces) {
 
 function renderRisks(risks) {
   $("#riskList").innerHTML = (risks || [])
-    .map((risk) => `<div class="risk-item">${risk}</div>`)
+    .map((risk) => `<div class="risk-item">${escapeHtml(risk)}</div>`)
     .join("");
+}
+
+function renderDecisionBrief(brief) {
+  const data = brief || {};
+  $("#needText").textContent = data.user_need || "-";
+  $("#pathText").textContent = data.recommended_path || "-";
+  $("#whyList").innerHTML = (data.why_keyboy || [])
+    .map((item) => `<li>${escapeHtml(item)}</li>`)
+    .join("");
+  $("#tradeoffList").innerHTML = (data.tradeoffs || [])
+    .map((item) => `<li>${escapeHtml(item)}</li>`)
+    .join("");
+}
+
+function renderTrust(score) {
+  const data = score || {};
+  $("#trustScore").textContent = data.score ?? "-";
+  $("#trustLevel").textContent = data.level ? `可信度：${data.level}` : "可信度：-";
+  $("#trustSignals").innerHTML = (data.signals || [])
+    .map((signal) => {
+      const max = Number(signal.max || 1);
+      const raw = Number(signal.score || 0);
+      const percent = max > 0 ? Math.max(0, Math.min(100, (raw / max) * 100)) : 0;
+      return `
+        <div class="signal-item">
+          <div class="signal-head">
+            <strong>${escapeHtml(signal.name)}</strong>
+            <span>${escapeHtml(signal.score)} / ${escapeHtml(signal.max)}</span>
+          </div>
+          <div class="bar"><span style="width:${percent}%"></span></div>
+          <small>${escapeHtml(signal.detail)}</small>
+        </div>
+      `;
+    })
+    .join("");
+}
+
+function renderKnowledgeMap(map) {
+  const data = map || {};
+  const concepts = data.concepts || [];
+  $("#conceptCloud").innerHTML = concepts.length
+    ? concepts.map((item) => `<span>${escapeHtml(item.name)}</span>`).join("")
+    : `<span>暂无概念</span>`;
+  $("#sourceCoverage").innerHTML = (data.source_coverage || [])
+    .map((item) => `<div><strong>${escapeHtml(item.name)}</strong><span>${escapeHtml(item.count)} 条</span></div>`)
+    .join("");
+}
+
+function renderFrontier(patterns) {
+  $("#frontierList").innerHTML = (patterns || [])
+    .map(
+      (item) => `
+        <div class="frontier-item">
+          <strong>${escapeHtml(item.name)}</strong>
+          <span>${escapeHtml(item.strength)}</span>
+          <small>已融合：${escapeHtml(item.integrated_as)}</small>
+        </div>
+      `
+    )
+    .join("");
+}
+
+function renderNextQuestions(questions) {
+  $("#nextQuestionList").innerHTML = (questions || [])
+    .map((item) => `<button class="next-question" type="button">${escapeHtml(item)}</button>`)
+    .join("");
+  $$(".next-question").forEach((button) => {
+    button.addEventListener("click", () => {
+      $("#queryInput").value = button.textContent;
+      runCurrentMode();
+    });
+  });
 }
 
 function renderResearch(payload) {
   $("#statusText").textContent = `当前模式：${state.mode === "local" ? "本地证据" : "在线 Agentic Research"}`;
   $("#latencyBadge").textContent = `${payload.metrics.latency_ms} ms`;
   $("#summaryText").textContent = payload.answer;
-  $("#insightList").innerHTML = payload.findings.map((item) => `<li>${item}</li>`).join("");
+  $("#insightList").innerHTML = payload.findings.map((item) => `<li>${escapeHtml(item)}</li>`).join("");
   renderCitations(payload.citations);
   renderTrace(payload.traces);
   renderRisks(payload.risks);
+  renderDecisionBrief(payload.decision_brief);
+  renderTrust(payload.trust_score);
+  renderKnowledgeMap(payload.knowledge_map);
+  renderFrontier(payload.frontier_patterns);
+  renderNextQuestions(payload.next_questions);
 
   const plan = payload.plan || {};
   dl($("#profileList"), [
@@ -150,6 +236,32 @@ async function classicSearch() {
     })),
     findings: payload.insights,
     risks: ["当前为兼容旧版本的本地混合检索链路。"],
+    decision_brief: {
+      user_need: "快速查清本地知识库中的课程设计证据。",
+      recommended_path: "本地 Search 适合做快速定位；需要前沿资料、风险校验和行动建议时切换到 Research。",
+      why_keyboy: ["搜索结果带评分解释。", "本地知识库可离线稳定演示。"],
+      tradeoffs: ["本地 Search 速度快，但不会访问在线源，也不会生成完整决策简报。"],
+    },
+    trust_score: {
+      score: Math.min(80, 30 + payload.hits.length * 6),
+      level: "本地",
+      signals: [
+        { name: "本地命中", score: payload.hits.length, max: 8, detail: `${payload.hits.length} 条本地结果` },
+        { name: "离线稳定", score: 10, max: 10, detail: "无需网络和模型 API" },
+      ],
+    },
+    knowledge_map: {
+      concepts: payload.hits.slice(0, 6).flatMap((hit) => (hit.matched_terms || []).slice(0, 2)).map((term) => ({ name: term, weight: 1 })),
+      source_coverage: Object.entries(payload.hits.reduce((acc, hit) => {
+        acc[hit.document.source] = (acc[hit.document.source] || 0) + 1;
+        return acc;
+      }, {})).map(([name, count]) => ({ name, count })),
+    },
+    frontier_patterns: [],
+    next_questions: [
+      `${payload.query} 的下一步工程实现是什么？`,
+      `${payload.query} 需要哪些验收指标？`,
+    ],
     metrics: {
       latency_ms: payload.metrics.latency_ms,
       llm_used: false,
