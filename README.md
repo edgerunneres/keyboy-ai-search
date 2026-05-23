@@ -32,7 +32,7 @@ python -m keyboy.app --host 127.0.0.1 --port 8787
 百炼平台兼容 OpenAI Chat Completions。只需要设置 `DASHSCOPE_API_KEY`，系统会自动使用：
 
 - Base URL: `https://dashscope.aliyuncs.com/compatible-mode/v1`
-- 默认模型：`qwen3.6-max-preview`
+- 默认模型：`qwen3.7-max`
 
 ```powershell
 $env:DASHSCOPE_API_KEY="你的百炼 API Key"
@@ -43,11 +43,11 @@ python -m keyboy.app --host 127.0.0.1 --port 8787
 
 ```powershell
 $env:DASHSCOPE_API_KEY="你的百炼 API Key"
-$env:KEYBOY_LLM_MODEL="qwen3.6-max-preview"
+$env:KEYBOY_LLM_MODEL="qwen3.7-max"
 python -m keyboy.app --host 127.0.0.1 --port 8787
 ```
 
-如果你更看重稳定生产能力、超长上下文和完整工具能力，也可以把 `KEYBOY_LLM_MODEL` 改为 `qwen3.6-plus`。
+如果你更看重稳定生产能力和成本控制，也可以把 `KEYBOY_LLM_MODEL` 改为 `qwen3.6-plus`；如果需要固定复现实验结果，可以使用对应的快照版本，例如 `qwen3.7-max-2026-05-20`。
 
 也可以使用安全启动脚本，避免把 Key 写进命令历史：
 

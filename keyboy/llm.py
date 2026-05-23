@@ -58,7 +58,7 @@ class LLMProvider:
         if os.getenv("KEYBOY_LLM_MODEL"):
             return os.getenv("KEYBOY_LLM_MODEL", "")
         if os.getenv("DASHSCOPE_API_KEY"):
-            return "qwen3.6-max-preview"
+            return "qwen3.7-max"
         return "openai-compatible-model"
 
     def chat(self, messages: list[dict[str, str]], *, temperature: float = 0.2, max_tokens: int = 1200) -> LLMResult:

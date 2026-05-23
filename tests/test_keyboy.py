@@ -45,6 +45,17 @@ class KeyBoyTest(unittest.TestCase):
         self.assertIn("CriticAgent", [trace.name for trace in result.traces])
         self.assertFalse(result.metrics["llm_used"])
 
+    def test_agentic_research_generates_decision_layer(self):
+        agentic = AgenticKeyBoySystem()
+        result = agentic.research("为什么用户会选择 KeyBoy 做前沿项目研究", online=False, include_local=True, limit=5)
+        payload = result.to_dict()
+        self.assertIn("StrategyAgent", [trace.name for trace in result.traces])
+        self.assertTrue(payload["decision_brief"]["recommended_path"])
+        self.assertGreaterEqual(payload["trust_score"]["score"], 1)
+        self.assertTrue(payload["knowledge_map"]["concepts"])
+        self.assertTrue(payload["next_questions"])
+        self.assertGreaterEqual(len(payload["frontier_patterns"]), 5)
+
     def test_dashscope_defaults(self):
         with patch.dict(
             "os.environ",
@@ -59,7 +70,7 @@ class KeyBoyTest(unittest.TestCase):
         ):
             provider = LLMProvider()
             self.assertEqual(provider.base_url, "https://dashscope.aliyuncs.com/compatible-mode/v1")
-            self.assertEqual(provider.model, "qwen3.6-max-preview")
+            self.assertEqual(provider.model, "qwen3.7-max")
             self.assertTrue(provider.enabled)
 
 

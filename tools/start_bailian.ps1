@@ -1,5 +1,5 @@
 param(
-  [string]$Model = "qwen3.6-max-preview",
+  [string]$Model = "qwen3.7-max",
   [string]$HostName = "127.0.0.1",
   [int]$Port = 8787
 )
@@ -21,5 +21,9 @@ if (-not $env:DASHSCOPE_API_KEY) {
 $env:KEYBOY_LLM_MODEL = $Model
 $env:KEYBOY_LLM_BASE_URL = "https://dashscope.aliyuncs.com/compatible-mode/v1"
 
-python -m keyboy.app --host $HostName --port $Port
+if (Get-Command py -ErrorAction SilentlyContinue) {
+  py -3 -m keyboy.app --host $HostName --port $Port
+} else {
+  python -m keyboy.app --host $HostName --port $Port
+}
 

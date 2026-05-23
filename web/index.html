@@ -68,6 +68,32 @@
           <ul id="insightList"></ul>
         </section>
 
+        <section class="decision-panel">
+          <div class="decision-block">
+            <span class="eyebrow">用户需求</span>
+            <p id="needText">-</p>
+          </div>
+          <div class="decision-block decision-main">
+            <span class="eyebrow">推荐路线</span>
+            <p id="pathText">-</p>
+          </div>
+          <div class="decision-columns">
+            <div>
+              <h2>为什么选 KeyBoy</h2>
+              <ul id="whyList"></ul>
+            </div>
+            <div>
+              <h2>取舍判断</h2>
+              <ul id="tradeoffList"></ul>
+            </div>
+          </div>
+        </section>
+
+        <section class="next-panel">
+          <h2>继续追问</h2>
+          <div id="nextQuestionList" class="next-question-list"></div>
+        </section>
+
         <section class="results-head">
           <h2>证据来源</h2>
           <span id="resultCount">0 条</span>
@@ -86,8 +112,22 @@
         </section>
         <section class="panel">
           <h2>模型与质量</h2>
+          <div class="trust-box">
+            <strong id="trustScore">-</strong>
+            <span id="trustLevel">可信度：-</span>
+          </div>
+          <div id="trustSignals" class="signal-list"></div>
           <dl id="qualityList"></dl>
           <div id="riskList" class="risk-list"></div>
+        </section>
+        <section class="panel">
+          <h2>知识地图</h2>
+          <div id="conceptCloud" class="concept-cloud"></div>
+          <div id="sourceCoverage" class="source-coverage"></div>
+        </section>
+        <section class="panel">
+          <h2>融合的前沿能力</h2>
+          <div id="frontierList" class="frontier-list"></div>
         </section>
       </aside>
     </main>
