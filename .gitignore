@@ -10,9 +10,14 @@ env/
 # Local QA render outputs generated from DOCX verification.
 docs/_rendered_keyboy_doc/
 
+# V2 is a separate repo.
+keyboy_v2/
+
+# Course documents (personal submissions).
+*.docx
+
 # Editor and OS files.
 .idea/
 .vscode/
 .DS_Store
 Thumbs.db
-

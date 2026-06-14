@@ -7,127 +7,150 @@
     <link rel="stylesheet" href="/style.css" />
   </head>
   <body>
+    <!-- 动态背景 -->
+    <div class="dynamic-bg">
+      <div class="blob blob-1"></div>
+      <div class="blob blob-2"></div>
+      <div class="blob blob-3"></div>
+    </div>
+
     <main class="shell">
       <aside class="side-panel">
-        <div class="brand">
-          <div class="brand-mark">K</div>
+        <div class="brand panel-glass">
+          <div class="brand-mark">
+            <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+              <path d="M21 2l-2 2m-7.61 7.61a5.5 5.5 0 1 1-7.778 7.778 5.5 5.5 0 0 1 7.777-7.777zm0 0L15.5 7.5m0 0l3 3L22 7l-3-3m-3.5 3.5L19 4"></path>
+            </svg>
+          </div>
           <div>
             <h1>KeyBoy</h1>
             <p>LLM 多智能体研究系统</p>
           </div>
         </div>
 
-        <section class="panel">
-          <h2>研究配置</h2>
-          <div class="metric-grid">
-            <div><span id="docCount">-</span><small>文档</small></div>
-            <div><span id="vocabCount">-</span><small>词项</small></div>
+        <section class="panel panel-glass">
+          <div class="panel-header">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 20V10M18 20V4M6 20v-4"/></svg>
+            <h2>研究配置</h2>
           </div>
-          <label class="check-row">
+          <div class="metric-grid">
+            <div class="metric-card"><span id="docCount">-</span><small>文档总数</small></div>
+            <div class="metric-card"><span id="vocabCount">-</span><small>词项总数</small></div>
+          </div>
+          
+          <label class="toggle-switch">
             <input id="onlineToggle" type="checkbox" checked />
+            <div class="toggle-slider"></div>
             <span>启用在线研究源</span>
           </label>
-          <label for="sourceFilter">来源</label>
-          <select id="sourceFilter"></select>
-          <label for="categoryFilter">主题</label>
-          <select id="categoryFilter"></select>
+          
+          <div class="form-group">
+            <label for="sourceFilter">来源</label>
+            <div class="select-wrapper">
+              <select id="sourceFilter"></select>
+              <svg class="select-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M6 9l6 6 6-6"/></svg>
+            </div>
+          </div>
+          <div class="form-group">
+            <label for="categoryFilter">主题</label>
+            <div class="select-wrapper">
+              <select id="categoryFilter"></select>
+              <svg class="select-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M6 9l6 6 6-6"/></svg>
+            </div>
+          </div>
         </section>
 
-        <section class="panel">
-          <h2>演示查询</h2>
-          <button class="example" data-query="Agentic RAG GraphRAG LightRAG Self-RAG 最新研究怎么整合到课程项目">Agentic RAG 前沿整合</button>
-          <button class="example" data-query="大模型多智能体在线研究系统应该如何设计">多智能体系统设计</button>
-          <button class="example" data-query="GraphRAG 和 LightRAG 相比普通 RAG 强在哪里">GraphRAG / LightRAG 对比</button>
+        <section class="panel panel-glass">
+          <div class="panel-header">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><path d="M12 8v4l3 3"/></svg>
+            <h2>演示查询</h2>
+          </div>
+          <button class="example-btn" data-query="Agentic RAG GraphRAG LightRAG Self-RAG 最新研究怎么整合到课程项目">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>
+            <span>Agentic RAG 前沿整合</span>
+          </button>
+          <button class="example-btn" data-query="大模型多智能体在线研究系统应该如何设计">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>
+            <span>多智能体系统设计</span>
+          </button>
+          <button class="example-btn" data-query="GraphRAG 和 LightRAG 相比普通 RAG 强在哪里">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>
+            <span>GraphRAG / LightRAG 对比</span>
+          </button>
         </section>
       </aside>
 
       <section class="workspace">
-        <header class="topbar">
-          <div>
+        <header class="topbar panel-glass">
+          <div class="header-content">
             <h2>Agentic Deep Research</h2>
             <p id="statusText">正在初始化多智能体研究系统...</p>
           </div>
-          <div class="mode-switch" role="group" aria-label="检索模式">
+          <div class="segmented-control" role="group" aria-label="检索模式">
+            <div class="segmented-indicator"></div>
             <button class="active" data-mode="research">Research</button>
             <button data-mode="local">Local</button>
             <button data-mode="search">Search</button>
           </div>
         </header>
 
-        <form id="searchForm" class="searchbar">
-          <input id="queryInput" autocomplete="off" value="Agentic RAG GraphRAG LightRAG Self-RAG 最新研究怎么整合到课程项目" />
-          <button type="submit">研究</button>
+        <form id="searchForm" class="searchbar panel-glass">
+          <svg class="search-icon" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+          <input id="queryInput" autocomplete="off" placeholder="输入你想研究的任何主题..." value="Agentic RAG GraphRAG LightRAG Self-RAG 最新研究怎么整合到课程项目" />
+          <button type="submit" class="submit-btn">研究</button>
         </form>
 
-        <section class="answer-panel">
-          <div class="answer-head">
-          <h2>研究答案</h2>
-            <span id="latencyBadge">- ms</span>
-          </div>
-          <p id="summaryText">输入研究问题后，多智能体将规划、检索、阅读、合成并校验答案。</p>
-          <ul id="insightList"></ul>
-        </section>
+        <!-- Loading Skeleton -->
+        <div id="loadingOverlay" class="loading-overlay hidden">
+          <div class="spinner"></div>
+          <p>智能体正在深度思考并收集数据...</p>
+        </div>
 
-        <section class="decision-panel">
-          <div class="decision-block">
-            <span class="eyebrow">用户需求</span>
-            <p id="needText">-</p>
-          </div>
-          <div class="decision-block decision-main">
-            <span class="eyebrow">推荐路线</span>
-            <p id="pathText">-</p>
-          </div>
-          <div class="decision-columns">
-            <div>
-              <h2>为什么选 KeyBoy</h2>
-              <ul id="whyList"></ul>
+        <div id="mainContent" class="main-content">
+          <section class="answer-panel panel-glass">
+            <div class="answer-head">
+              <div class="panel-header">
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2v20M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"/></svg>
+                <h2>研究答案</h2>
+              </div>
+              <span id="latencyBadge" class="badge badge-teal">- ms</span>
             </div>
-            <div>
-              <h2>取舍判断</h2>
-              <ul id="tradeoffList"></ul>
+            <div class="answer-body">
+              <p id="summaryText">输入研究问题后，多智能体将规划、检索、阅读、合成并校验答案。</p>
+              <ul id="insightList"></ul>
             </div>
-          </div>
-        </section>
+          </section>
 
-        <section class="next-panel">
-          <h2>继续追问</h2>
-          <div id="nextQuestionList" class="next-question-list"></div>
-        </section>
-
-        <section class="results-head">
-          <h2>证据来源</h2>
-          <span id="resultCount">0 条</span>
-        </section>
-        <section id="results" class="results"></section>
+          <section class="results-head">
+            <h2>证据来源</h2>
+            <span id="resultCount" class="badge badge-blue">0 条</span>
+          </section>
+          <section id="results" class="results"></section>
+        </div>
       </section>
 
       <aside class="right-panel">
-        <section class="panel">
-          <h2>研究计划</h2>
+        <section class="panel panel-glass profile-panel">
+          <div class="panel-header">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="12 2 2 7 12 12 22 7 12 2"/><polyline points="2 17 12 22 22 17"/><polyline points="2 12 12 17 22 12"/></svg>
+            <h2>研究计划</h2>
+          </div>
           <dl id="profileList"></dl>
         </section>
-        <section class="panel">
-          <h2>Agent Trace</h2>
+        <section class="panel panel-glass trace-panel">
+          <div class="panel-header">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 12h-4l-3 9L9 3l-3 9H2"/></svg>
+            <h2>Agent Trace</h2>
+          </div>
           <div id="traceList" class="trace-list"></div>
         </section>
-        <section class="panel">
-          <h2>模型与质量</h2>
-          <div class="trust-box">
-            <strong id="trustScore">-</strong>
-            <span id="trustLevel">可信度：-</span>
+        <section class="panel panel-glass quality-panel">
+          <div class="panel-header">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>
+            <h2>模型与质量</h2>
           </div>
-          <div id="trustSignals" class="signal-list"></div>
           <dl id="qualityList"></dl>
           <div id="riskList" class="risk-list"></div>
-        </section>
-        <section class="panel">
-          <h2>知识地图</h2>
-          <div id="conceptCloud" class="concept-cloud"></div>
-          <div id="sourceCoverage" class="source-coverage"></div>
-        </section>
-        <section class="panel">
-          <h2>融合的前沿能力</h2>
-          <div id="frontierList" class="frontier-list"></div>
         </section>
       </aside>
     </main>

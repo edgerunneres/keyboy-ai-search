@@ -93,7 +93,7 @@ class LLMProvider:
                 raw = json.loads(response.read().decode("utf-8"))
             text = raw["choices"][0]["message"]["content"]
             return LLMResult(text=text, model=self.model, provider=self.base_url, used_remote_model=True, raw=raw)
-        except (urllib.error.URLError, KeyError, IndexError, json.JSONDecodeError, TimeoutError) as exc:
+        except Exception as exc:
             return LLMResult(
                 text=f"LLM call failed: {exc}",
                 model=self.model,

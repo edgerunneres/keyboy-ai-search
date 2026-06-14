@@ -215,6 +215,7 @@ class SynthesisAgent:
             "findings": fallback_findings,
             "llm_used": llm_result.used_remote_model,
             "model": llm_result.model,
+            "llm_error": llm_result.text if not llm_result.used_remote_model and self.llm.enabled else None
         }
         return type("AgentResult", (), {"payload": payload, "trace_message": "完成证据合成"})()
 
@@ -225,7 +226,10 @@ class CriticAgent:
         citations = result.get("citations", [])
         risks: list[str] = []
         if not result.get("llm_used"):
-            risks.append("当前未检测到大模型 API Key，回答由本地确定性合成器生成；设置 KEYBOY_LLM_API_KEY 和 KEYBOY_LLM_MODEL 后会启用真实 LLM。")
+            if result.get("llm_error"):
+                risks.append(f"大模型调用失败，已回退到本地合成器。真实报错：{result['llm_error']}")
+            else:
+                risks.append("当前未检测到大模型 API Key，回答由本地确定性合成器生成；设置 KEYBOY_LLM_API_KEY 和 KEYBOY_LLM_MODEL 后会启用真实 LLM。")
         if len(citations) < 3:
             risks.append("证据数量不足，建议扩大在线源或增加子查询。")
         sources = {item.get("source") for item in citations}
@@ -463,7 +467,7 @@ class AgenticKeyBoySystem:
 
         plan_result, trace = self.planner_agent.plan(query)
         traces.append(trace)
-        plan: ResearchPlan = plan_result.payload
+        plan: ResearchPlan = plan_result.payload if plan_result else self.planner_agent._fallback_plan(query)
 
         discovery_result, trace = self.discovery_agent.discover(plan, online=online)
         traces.append(trace)
