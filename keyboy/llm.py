@@ -39,11 +39,40 @@ class LLMProvider:
         )
         self.base_url = self._default_base_url().rstrip("/")
         self.model = self._default_model()
-        self.timeout = float(os.getenv("KEYBOY_LLM_TIMEOUT", "35"))
+        self.timeout = float(os.getenv("KEYBOY_LLM_TIMEOUT", "60"))
 
     @property
     def enabled(self) -> bool:
         return bool(self.api_key and self.model != "openai-compatible-model")
+
+    def configure(
+        self,
+        *,
+        api_key: str | None = None,
+        base_url: str | None = None,
+        model: str | None = None,
+        timeout: float | None = None,
+        enable_thinking: bool | None = None,
+    ) -> None:
+        if api_key is not None:
+            self.api_key = api_key.strip()
+        if base_url is not None and base_url.strip():
+            self.base_url = base_url.strip().rstrip("/")
+        if model is not None and model.strip():
+            self.model = model.strip()
+        if timeout is not None:
+            self.timeout = max(3.0, float(timeout))
+        if enable_thinking is not None:
+            os.environ["KEYBOY_LLM_ENABLE_THINKING"] = "1" if enable_thinking else "0"
+
+    def safe_config(self) -> dict[str, Any]:
+        return {
+            "enabled": self.enabled,
+            "base_url": self.base_url,
+            "model": self.model,
+            "timeout": self.timeout,
+            "has_api_key": bool(self.api_key),
+        }
 
     @staticmethod
     def _default_base_url() -> str:

@@ -33,6 +33,17 @@ class KeyBoyHandler(BaseHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(body)
 
+    def _read_json(self) -> dict:
+        length = int(self.headers.get("Content-Length") or "0")
+        if length <= 0:
+            return {}
+        raw = self.rfile.read(length).decode("utf-8")
+        try:
+            payload = json.loads(raw)
+        except json.JSONDecodeError:
+            return {}
+        return payload if isinstance(payload, dict) else {}
+
     def _static(self, relative: str) -> None:
         target = (WEB_ROOT / relative.lstrip("/")).resolve()
         if WEB_ROOT.resolve() not in target.parents and target != WEB_ROOT.resolve():
@@ -64,7 +75,20 @@ class KeyBoyHandler(BaseHTTPRequestHandler):
         if parsed.path == "/api/health":
             SYSTEM.ensure_ready()
             assert SYSTEM.index is not None
-            self._json({"status": "ok", "stats": SYSTEM.index.stats(), "evaluation": SYSTEM.eval_metrics})
+            self._json(
+                {
+                    "status": "ok",
+                    "stats": SYSTEM.index.stats(),
+                    "evaluation": SYSTEM.eval_metrics,
+                    "llm": AGENTIC_SYSTEM.llm.safe_config(),
+                }
+            )
+            return
+        if parsed.path == "/api/config/llm":
+            self._json(AGENTIC_SYSTEM.llm.safe_config())
+            return
+        if parsed.path == "/api/config/sources":
+            self._json(AGENTIC_SYSTEM.discovery_agent.client.safe_config())
             return
         if parsed.path == "/api/search":
             q = query.get("q", [""])[0]
@@ -89,6 +113,60 @@ class KeyBoyHandler(BaseHTTPRequestHandler):
             self._json({"stats": SYSTEM.index.stats(), "evaluation": SYSTEM.eval_metrics, "traces": [t.to_dict() for t in SYSTEM.traces]})
             return
         self._static("index.html" if parsed.path == "/" else parsed.path)
+
+    def do_POST(self) -> None:
+        parsed = urlparse(self.path)
+        if parsed.path == "/api/config/llm":
+            payload = self._read_json()
+            provider = str(payload.get("provider") or "bailian")
+            base_url = str(payload.get("base_url") or "").strip()
+            model = str(payload.get("model") or "").strip()
+            api_key = str(payload.get("api_key") or "").strip()
+            timeout_value = payload.get("timeout")
+            timeout = None
+            if timeout_value not in (None, ""):
+                try:
+                    timeout = float(timeout_value)
+                except (TypeError, ValueError):
+                    timeout = None
+            if provider == "bailian" and not base_url:
+                base_url = "https://dashscope.aliyuncs.com/compatible-mode/v1"
+            if provider == "bailian" and not model:
+                model = "qwen-plus"
+            AGENTIC_SYSTEM.llm.configure(
+                api_key=api_key,
+                base_url=base_url,
+                model=model,
+                timeout=timeout,
+                enable_thinking=bool(payload.get("enable_thinking")),
+            )
+            self._json({"status": "ok", "llm": AGENTIC_SYSTEM.llm.safe_config()})
+            return
+        if parsed.path == "/api/config/sources":
+            payload = self._read_json()
+            timeout = None
+            per_source_limit = None
+            if payload.get("timeout") not in (None, ""):
+                try:
+                    timeout = float(payload.get("timeout"))
+                except (TypeError, ValueError):
+                    timeout = None
+            if payload.get("per_source_limit") not in (None, ""):
+                try:
+                    per_source_limit = int(payload.get("per_source_limit"))
+                except (TypeError, ValueError):
+                    per_source_limit = None
+            AGENTIC_SYSTEM.discovery_agent.client.configure(
+                semantic_scholar_api_key=str(payload.get("semantic_scholar_api_key") or ""),
+                openalex_api_key=str(payload.get("openalex_api_key") or ""),
+                openalex_mailto=str(payload.get("openalex_mailto") or ""),
+                crossref_mailto=str(payload.get("crossref_mailto") or ""),
+                timeout=timeout,
+                per_source_limit=per_source_limit,
+            )
+            self._json({"status": "ok", "sources": AGENTIC_SYSTEM.discovery_agent.client.safe_config()})
+            return
+        self.send_error(HTTPStatus.NOT_FOUND)
 
 
 def main() -> None:

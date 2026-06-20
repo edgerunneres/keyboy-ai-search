@@ -1,10 +1,11 @@
 import unittest
 from unittest.mock import patch
 
-from keyboy.agentic import AgenticKeyBoySystem
+from keyboy.agentic import AgenticKeyBoySystem, ResearchPlannerAgent
 from keyboy.agents import KeyBoySystem
 from keyboy.evaluator import evaluate
 from keyboy.llm import LLMProvider
+from keyboy.online_sources import OnlineSourceClient
 from keyboy.storage import load_eval_queries
 
 
@@ -72,6 +73,22 @@ class KeyBoyTest(unittest.TestCase):
             self.assertEqual(provider.base_url, "https://dashscope.aliyuncs.com/compatible-mode/v1")
             self.assertEqual(provider.model, "qwen3.7-max")
             self.assertTrue(provider.enabled)
+
+    def test_llm_source_plan_normalizes_to_online_sources(self):
+        fallback = ["openalex", "semanticscholar", "arxiv", "crossref"]
+        raw_sources = [
+            "peer-reviewed papers from ACL and NeurIPS",
+            "Microsoft Research publications and GitHub repositories for GraphRAG",
+            "Crossref DOI metadata",
+        ]
+        sources = ResearchPlannerAgent._normalize_source_plan(raw_sources, fallback)
+        self.assertEqual(sources, fallback)
+
+    def test_online_source_default_mailto(self):
+        with patch.dict("os.environ", {"OPENALEX_MAILTO": "", "CROSSREF_MAILTO": ""}, clear=False):
+            client = OnlineSourceClient()
+            self.assertEqual(client.openalex_mailto, "yup300737@gmail.com")
+            self.assertEqual(client.crossref_mailto, "yup300737@gmail.com")
 
 
 if __name__ == "__main__":

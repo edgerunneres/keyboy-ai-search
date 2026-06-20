@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 import time
 from collections import Counter
 from dataclasses import dataclass, field
@@ -114,11 +115,34 @@ class ResearchPlannerAgent:
         plan = ResearchPlan(
             intent=str(parsed.get("intent") or fallback.intent),
             subqueries=[str(x) for x in parsed.get("subqueries", fallback.subqueries)][:6],
-            source_plan=[str(x).lower() for x in parsed.get("source_plan", fallback.source_plan)][:4],
+            source_plan=self._normalize_source_plan(parsed.get("source_plan", fallback.source_plan), fallback.source_plan),
             required_evidence=[str(x) for x in parsed.get("required_evidence", fallback.required_evidence)][:6],
             llm_used=llm_result.used_remote_model,
         )
         return type("AgentResult", (), {"payload": plan, "trace_message": f"规划 {len(plan.subqueries)} 个子查询"})()
+
+    @staticmethod
+    def _normalize_source_plan(raw_sources: Any, fallback: list[str]) -> list[str]:
+        if not isinstance(raw_sources, list):
+            raw_sources = [raw_sources]
+        mapped: list[str] = []
+        for item in raw_sources:
+            source = str(item or "").lower()
+            expanded: list[str] = []
+            if "openalex" in source:
+                expanded.append("openalex")
+            if "semantic" in source or "scholar" in source:
+                expanded.append("semanticscholar")
+            if "arxiv" in source or "preprint" in source:
+                expanded.append("arxiv")
+            if "crossref" in source or "doi" in source:
+                expanded.append("crossref")
+            if any(term in source for term in ("paper", "peer", "academic", "publication", "journal", "conference", "acl", "neurips", "research")):
+                expanded.extend(fallback)
+            for canonical in expanded:
+                if canonical not in mapped:
+                    mapped.append(canonical)
+        return (mapped or fallback)[:4]
 
     @staticmethod
     def _fallback_plan(query: str) -> ResearchPlan:
@@ -145,17 +169,63 @@ class OnlineDiscoveryAgent:
     @traced("OnlineDiscoveryAgent")
     def discover(self, plan: ResearchPlan, *, online: bool = True) -> Any:
         if not online:
-            return type("AgentResult", (), {"payload": ([], ["online=false"]), "trace_message": "跳过在线源"})()
+            return type(
+                "AgentResult",
+                (),
+                {"payload": ([], ["已关闭在线研究源，当前仅使用本地知识库。"]), "trace_message": "跳过在线源"},
+            )()
         docs: list[SearchDocument] = []
         warnings: list[str] = []
-        for subquery in plan.subqueries[:4]:
+        try:
+            max_queries = max(1, int(os.getenv("KEYBOY_ONLINE_QUERY_LIMIT", "1")))
+        except ValueError:
+            max_queries = 1
+        for subquery in plan.subqueries[:max_queries]:
             found, source_warnings = self.client.search(subquery, plan.source_plan)
             docs.extend(found)
             warnings.extend(source_warnings)
         unique: dict[str, SearchDocument] = {}
         for doc in docs:
             unique.setdefault(doc.id, doc)
-        return type("AgentResult", (), {"payload": (list(unique.values()), warnings), "trace_message": f"在线发现 {len(unique)} 篇资料"})()
+        return type(
+            "AgentResult",
+            (),
+            {
+                "payload": (list(unique.values()), self._summarize_warnings(warnings)),
+                "trace_message": f"在线发现 {len(unique)} 篇资料",
+            },
+        )()
+
+    @staticmethod
+    def _summarize_warnings(warnings: list[str]) -> list[str]:
+        if not warnings:
+            return []
+        limited = sorted({OnlineDiscoveryAgent._warning_source(item) for item in warnings if "限流" in item})
+        timed_out = sorted({OnlineDiscoveryAgent._warning_source(item) for item in warnings if "超时" in item})
+        denied = sorted({item for item in warnings if "拒绝访问" in item})
+        other = sorted(
+            {
+                OnlineDiscoveryAgent._warning_source(item)
+                for item in warnings
+                if item and all(marker not in item for marker in ("限流", "超时", "拒绝访问"))
+            }
+        )
+        messages: list[str] = []
+        if limited:
+            messages.append(f"{'、'.join(limited)} 返回 429 限流；已跳过这些源并继续研究。")
+        if timed_out:
+            messages.append(f"{'、'.join(timed_out)} 响应超时；已使用其他可用证据继续。")
+        messages.extend(denied)
+        if other:
+            messages.append(f"{'、'.join(other)} 暂不可用；已使用可用证据和本地知识库继续。")
+        return messages or ["部分在线源暂不可用，已使用可用证据继续。"]
+
+    @staticmethod
+    def _warning_source(warning: str) -> str:
+        for marker in (" 限流", " 超时", " 拒绝访问", " HTTP", " 暂不可用"):
+            if marker in warning:
+                return warning.split(marker, 1)[0]
+        return warning
 
 
 class EvidenceRankerAgent:
@@ -193,16 +263,23 @@ class SynthesisAgent:
             context_blocks.append(f"[{idx}] {hit.document.title}\n{evidence}\nURL: {hit.document.url}")
 
         fallback_summary, fallback_findings = build_summary(query, hits)
-        fallback_answer = f"{fallback_summary}\n\n证据来源：" + "、".join(f"[{c['id']}] {c['title']}" for c in citations[:5])
+        evidence_lines = "\n".join(f"- [{c['id']}] {c['title']}" for c in citations[:5])
+        fallback_answer = (
+            f"## 核心结论\n{fallback_summary}\n\n"
+            f"## 证据来源\n{evidence_lines}"
+        )
         if not citations:
-            fallback_answer = "未获得足够证据。建议开启在线源或提供更具体的问题。"
+            fallback_answer = "## 证据不足\n未获得足够证据。建议开启在线源、填写在线源 API 信息，或提供更具体的问题。"
 
         messages = [
             {
                 "role": "system",
                 "content": (
                     "You are a citation-grounded synthesis agent. Answer in Chinese. "
-                    "Use only the provided evidence, cite sources like [1], [2], and state uncertainty."
+                    "Use only the provided evidence and cite sources like [1], [2]. "
+                    "Write as a polished research brief in Markdown with clear sections: "
+                    "## 核心结论, ## 关键发现, ## 不确定性, ## 证据引用. "
+                    "Use short paragraphs and bullets. Do not output JSON, code fences, raw planning notes, or decorative symbols."
                 ),
             },
             {"role": "user", "content": f"问题：{query}\n\n证据：\n" + "\n\n".join(context_blocks)},
@@ -533,4 +610,3 @@ class AgenticKeyBoySystem:
             metrics=metrics,
             traces=traces,
         )
-

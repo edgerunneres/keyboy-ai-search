@@ -4,9 +4,12 @@ import html
 import json
 import os
 import re
+import socket
 import time
+import urllib.error
 import urllib.parse
 import urllib.request
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass
 from typing import Any
 from xml.etree import ElementTree as ET
@@ -46,45 +49,118 @@ class OnlinePaper:
         )
 
 
+DISPLAY_NAMES = {
+    "openalex": "OpenAlex",
+    "semanticscholar": "Semantic Scholar",
+    "arxiv": "arXiv",
+    "crossref": "Crossref",
+}
+
+
 class OnlineSourceClient:
-    def __init__(self, timeout: float = 6.0, per_source_limit: int = 4) -> None:
-        self.timeout = timeout
+    def __init__(self, timeout: float = 15.0, per_source_limit: int = 5) -> None:
+        self.timeout = float(os.getenv("KEYBOY_ONLINE_TIMEOUT", str(timeout)))
         self.per_source_limit = per_source_limit
         self.user_agent = "KeyBoyAgenticResearch/3.0 (course-design; polite online research)"
         self.disabled = os.getenv("KEYBOY_DISABLE_ONLINE", "0") == "1"
+        self.semantic_scholar_api_key = os.getenv("SEMANTIC_SCHOLAR_API_KEY", "")
+        self.openalex_api_key = os.getenv("OPENALEX_API_KEY", "")
+        self.openalex_mailto = os.getenv("OPENALEX_MAILTO") or "yup300737@gmail.com"
+        self.crossref_mailto = os.getenv("CROSSREF_MAILTO") or "yup300737@gmail.com"
+
+    def configure(
+        self,
+        *,
+        semantic_scholar_api_key: str | None = None,
+        openalex_api_key: str | None = None,
+        openalex_mailto: str | None = None,
+        crossref_mailto: str | None = None,
+        timeout: float | None = None,
+        per_source_limit: int | None = None,
+    ) -> None:
+        if semantic_scholar_api_key is not None:
+            self.semantic_scholar_api_key = semantic_scholar_api_key.strip()
+        if openalex_api_key is not None:
+            self.openalex_api_key = openalex_api_key.strip()
+        if openalex_mailto is not None:
+            self.openalex_mailto = openalex_mailto.strip()
+        if crossref_mailto is not None:
+            self.crossref_mailto = crossref_mailto.strip()
+        if timeout is not None:
+            self.timeout = max(3.0, float(timeout))
+        if per_source_limit is not None:
+            self.per_source_limit = max(1, min(8, int(per_source_limit)))
+
+    def safe_config(self) -> dict[str, Any]:
+        return {
+            "semantic_scholar": {"has_api_key": bool(self.semantic_scholar_api_key)},
+            "openalex": {
+                "has_api_key": bool(self.openalex_api_key),
+                "mailto": self.openalex_mailto,
+            },
+            "crossref": {"mailto": self.crossref_mailto},
+            "timeout": self.timeout,
+            "per_source_limit": self.per_source_limit,
+        }
 
     def search(self, query: str, sources: list[str] | None = None) -> tuple[list[SearchDocument], list[str]]:
         if self.disabled:
             return [], ["Online source access disabled by KEYBOY_DISABLE_ONLINE=1."]
-        selected = sources or ["openalex", "semanticscholar", "arxiv", "crossref"]
+        selected = [source for source in (sources or []) if source in DISPLAY_NAMES]
+        if not selected:
+            selected = ["openalex", "semanticscholar", "arxiv", "crossref"]
         documents: list[SearchDocument] = []
         warnings: list[str] = []
-        for source in selected:
-            try:
-                if source == "openalex":
-                    papers = self._openalex(query)
-                elif source == "semanticscholar":
-                    papers = self._semantic_scholar(query)
-                elif source == "arxiv":
-                    papers = self._arxiv(query)
-                elif source == "crossref":
-                    papers = self._crossref(query)
-                else:
-                    papers = []
-                documents.extend(paper.to_document() for paper in papers)
-                time.sleep(0.15)
-            except Exception as exc:
-                warnings.append(f"{source} failed: {exc}")
+        with ThreadPoolExecutor(max_workers=min(4, len(selected))) as executor:
+            futures = {executor.submit(self._search_source, source, query): source for source in selected}
+            for future in as_completed(futures):
+                source = futures[future]
+                try:
+                    papers = future.result()
+                    documents.extend(paper.to_document() for paper in papers)
+                    time.sleep(0.05)
+                except urllib.error.HTTPError as exc:
+                    warnings.append(self._http_warning(source, exc))
+                except (TimeoutError, socket.timeout):
+                    warnings.append(f"{DISPLAY_NAMES.get(source, source)} 超时")
+                except urllib.error.URLError as exc:
+                    reason = str(getattr(exc, "reason", exc))
+                    if "timed out" in reason.lower():
+                        warnings.append(f"{DISPLAY_NAMES.get(source, source)} 超时")
+                    else:
+                        warnings.append(f"{DISPLAY_NAMES.get(source, source)} 暂不可用")
+                except Exception:
+                    warnings.append(f"{DISPLAY_NAMES.get(source, source)} 暂不可用")
 
         unique: dict[str, SearchDocument] = {}
         for doc in documents:
             unique.setdefault(doc.id, doc)
         return list(unique.values()), warnings
 
+    def _search_source(self, source: str, query: str) -> list[OnlinePaper]:
+        if source == "openalex":
+            return self._openalex(query)
+        if source == "semanticscholar":
+            return self._semantic_scholar(query)
+        if source == "arxiv":
+            return self._arxiv(query)
+        if source == "crossref":
+            return self._crossref(query)
+        return []
+
+    @staticmethod
+    def _http_warning(source: str, exc: urllib.error.HTTPError) -> str:
+        name = DISPLAY_NAMES.get(source, source)
+        if exc.code == 429:
+            return f"{name} 限流 429"
+        if exc.code in {401, 403}:
+            return f"{name} 拒绝访问 {exc.code}"
+        return f"{name} HTTP {exc.code}"
+
     def _get_json(self, url: str) -> dict[str, Any]:
         headers = {"User-Agent": self.user_agent}
-        if "semanticscholar.org" in url and os.getenv("SEMANTIC_SCHOLAR_API_KEY"):
-            headers["x-api-key"] = os.getenv("SEMANTIC_SCHOLAR_API_KEY", "")
+        if "semanticscholar.org" in url and self.semantic_scholar_api_key:
+            headers["x-api-key"] = self.semantic_scholar_api_key
         request = urllib.request.Request(url, headers=headers)
         with urllib.request.urlopen(request, timeout=self.timeout) as response:
             return json.loads(response.read().decode("utf-8"))
@@ -107,14 +183,16 @@ class OnlineSourceClient:
         return normalize_text(html.unescape(ABSTRACT_TAG_RE.sub(" ", text)))
 
     def _openalex(self, query: str) -> list[OnlinePaper]:
-        params = urllib.parse.urlencode(
-            {
-                "search": query,
-                "per-page": self.per_source_limit,
-                "sort": "relevance_score:desc",
-                "mailto": "course-design@example.com",
-            }
-        )
+        query_params = {
+            "search": query,
+            "per-page": self.per_source_limit,
+            "sort": "relevance_score:desc",
+        }
+        if self.openalex_mailto:
+            query_params["mailto"] = self.openalex_mailto
+        if self.openalex_api_key:
+            query_params["api_key"] = self.openalex_api_key
+        params = urllib.parse.urlencode(query_params)
         data = self._get_json(f"https://api.openalex.org/works?{params}")
         papers: list[OnlinePaper] = []
         for item in data.get("results", []):
@@ -213,13 +291,14 @@ class OnlineSourceClient:
         return papers
 
     def _crossref(self, query: str) -> list[OnlinePaper]:
-        params = urllib.parse.urlencode(
-            {
-                "query": query,
-                "rows": self.per_source_limit,
-                "select": "title,URL,abstract,issued,published-online,published-print,container-title,author,is-referenced-by-count",
-            }
-        )
+        query_params = {
+            "query": query,
+            "rows": self.per_source_limit,
+            "select": "title,URL,abstract,issued,published-online,published-print,container-title,author,is-referenced-by-count",
+        }
+        if self.crossref_mailto:
+            query_params["mailto"] = self.crossref_mailto
+        params = urllib.parse.urlencode(query_params)
         data = self._get_json(f"https://api.crossref.org/works?{params}")
         papers: list[OnlinePaper] = []
         for item in data.get("message", {}).get("items", []):
