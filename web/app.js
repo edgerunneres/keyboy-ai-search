@@ -8,6 +8,8 @@ const state = {
   hasResult: false,
   typeTimer: null,
   autoFollowAnswer: true,
+  currentChat: null,
+  abortController: null,
 };
 
 const $ = (selector) => document.querySelector(selector);
@@ -18,17 +20,12 @@ const nodes = {
   query: $("#queryInput"),
   submit: $("#submitBtn"),
   online: $("#onlineToggle"),
-  status: $("#statusText"),
   docCount: $("#docCount"),
   modelState: $("#modelState"),
-  loading: $("#loadingState"),
-  answerStage: $(".answer-stage"),
-  latency: $("#latencyBadge"),
-  summary: $("#summaryText"),
-  insights: $("#insightList"),
-  resultActions: $("#resultActions"),
   results: $("#results"),
-  resultCount: $("#resultCount"),
+  dockContainer: $("#dockContainer"),
+  chatHistory: $("#chatHistory"),
+  chatItemTemplate: $("#chatItemTemplate"),
   drawerOverlay: $("#drawerOverlay"),
   drawerTitle: $("#drawerTitle"),
   drawerClose: $("#drawerClose"),
@@ -65,14 +62,21 @@ nodes.query.placeholder = DEFAULT_QUERY;
 
 function setBusy(value) {
   state.running = value;
-  nodes.submit.disabled = value;
-  nodes.loading.classList.toggle("hidden", !value);
+  nodes.submit.textContent = value ? "停止" : "研究";
+  nodes.form.classList.toggle("loading", value);
+  nodes.online.disabled = value;
+  $$(".top-actions .ghost-btn").forEach(btn => btn.disabled = value);
+  if (value) {
+    document.body.classList.add("has-result");
+    nodes.dockContainer.classList.add("docked");
+  }
 }
 
 function setResultControlsVisible(value) {
   state.hasResult = value;
-  document.body.classList.toggle("has-result", value);
-  nodes.resultActions.classList.toggle("hidden", !value);
+  if (state.currentChat) {
+    state.currentChat.resultActions.classList.toggle("hidden", !value);
+  }
 }
 
 function dl(container, pairs) {
@@ -193,23 +197,77 @@ function renderFormattedAnswer(text) {
   flushList();
   flushParagraph();
   html += "</article>";
-  nodes.summary.innerHTML = html;
+  if (state.currentChat) state.currentChat.summary.innerHTML = html;
 }
 
 function typeAnswer(text) {
   window.clearInterval(state.typeTimer);
-  nodes.summary.innerHTML = "";
   state.typeTimer = null;
-  state.autoFollowAnswer = false;
-  nodes.answerStage.scrollTop = 0;
-  renderFormattedAnswer(text || "没有生成答案。");
-  window.requestAnimationFrame(() => {
-    nodes.answerStage.scrollTop = 0;
-  });
+  state.autoFollowAnswer = true;
+
+  nodes.chatHistory.style.scrollBehavior = 'auto';
+
+  const cancelAutoScroll = () => { state.autoFollowAnswer = false; };
+  nodes.chatHistory.addEventListener('wheel', cancelAutoScroll, { once: true });
+  nodes.chatHistory.addEventListener('touchstart', cancelAutoScroll, { once: true });
+
+  const fullText = text || "没有生成答案。";
+
+  /* Step 1: Render with the original formatter — formatting is 100% identical */
+  renderFormattedAnswer(fullText);
+
+  /* Step 2: Collect all text nodes, store their content, then clear them */
+  const el = state.currentChat.summary;
+  const textNodes = [];
+  const walker = document.createTreeWalker(el, NodeFilter.SHOW_TEXT);
+  while (walker.nextNode()) {
+    const node = walker.currentNode;
+    if (node.textContent.trim()) {
+      textNodes.push({ node, full: node.textContent });
+      node.textContent = '';
+    }
+  }
+
+  /* Step 3: Type through text nodes at 60fps */
+  let nIdx = 0, cIdx = 0;
+
+  const tick = () => {
+    if (nIdx >= textNodes.length) {
+      nodes.chatHistory.style.scrollBehavior = '';
+      nodes.chatHistory.removeEventListener('wheel', cancelAutoScroll);
+      nodes.chatHistory.removeEventListener('touchstart', cancelAutoScroll);
+      return;
+    }
+
+    const item = textNodes[nIdx];
+    const speed = item.full.length > 50 ? 3 : 1;
+    cIdx += speed;
+
+    if (cIdx >= item.full.length) {
+      item.node.textContent = item.full;
+      cIdx = 0;
+      nIdx++;
+    } else {
+      item.node.textContent = item.full.substring(0, cIdx);
+    }
+
+    /* Smooth lerp scroll — keep typing position at ~70% from top */
+    if (state.autoFollowAnswer && state.currentChat) {
+      const containerRect = nodes.chatHistory.getBoundingClientRect();
+      const elRect = el.getBoundingClientRect();
+      const offset = containerRect.height * 0.3;
+      const gap = elRect.bottom - containerRect.bottom + offset;
+      if (gap > 0) {
+        nodes.chatHistory.scrollTop += gap * 0.15;
+      }
+    }
+
+    requestAnimationFrame(tick);
+  };
+  requestAnimationFrame(tick);
 }
 
 function renderCitations(citations) {
-  nodes.resultCount.textContent = String(citations.length);
   nodes.results.innerHTML = "";
   if (!citations.length) {
     nodes.results.innerHTML = `<div class="empty">没有获得证据来源</div>`;
@@ -281,18 +339,31 @@ function renderRisks(risks) {
   });
 }
 
-function renderResearch(payload) {
-  const metrics = payload.metrics || {};
-  const onlineDocs = metrics.online_documents ?? 0;
-  nodes.status.textContent = nodes.online.checked ? `在线资料 · ${onlineDocs} 篇` : "仅本地资料";
-  nodes.latency.textContent = `${metrics.latency_ms ?? "-"} ms`;
-  setResultControlsVisible(true);
-  typeAnswer(payload.answer || "没有生成答案。");
-  renderList(nodes.insights, payload.findings);
+function renderFollowups(query) {
+  if (!state.currentChat) return;
+  state.currentChat.followupList.innerHTML = "";
+  const questions = [
+    `深入了解 "${query}" 的最新技术进展和论文`,
+    `"${query}" 在实际工业落地中的主要痛点是什么？`,
+    `是否有与 "${query}" 相关的代表性开源方案？`
+  ];
+  questions.forEach(q => {
+    const btn = document.createElement("button");
+    btn.className = "followup-btn";
+    btn.textContent = q;
+    btn.onclick = () => {
+      nodes.query.value = q;
+      nodes.form.dispatchEvent(new Event("submit"));
+    };
+    state.currentChat.followupList.appendChild(btn);
+  });
+}
+
+function populateDrawers(payload) {
+  if (!payload) return;
   renderCitations(payload.citations || []);
   renderTrace(payload.traces);
   renderRisks(payload.risks);
-
   const plan = payload.plan || {};
   dl(nodes.profile, [
     ["意图", plan.intent],
@@ -300,7 +371,7 @@ function renderResearch(payload) {
     ["子查询", (plan.subqueries || []).join(" | ")],
     ["证据", (plan.required_evidence || []).join("、")],
   ]);
-
+  const metrics = payload.metrics || {};
   dl(nodes.quality, [
     ["模型", metrics.llm_used ? metrics.llm_model : "本地 fallback"],
     ["在线文档", metrics.online_documents],
@@ -309,10 +380,127 @@ function renderResearch(payload) {
   ]);
 }
 
+function renderResearch(payload) {
+  const chat = state.currentChat;
+  if (!chat) return;
+  chat.payload = payload;
+  chat.resultCount.textContent = String((payload.citations || []).length);
+  const metrics = payload.metrics || {};
+  chat.latencyBadge.textContent = `${metrics.latency_ms ?? "-"} ms`;
+  setResultControlsVisible(true);
+  typeAnswer(payload.answer || "没有生成答案。");
+  renderList(chat.insights, payload.findings);
+
+  chat.feedbackBar.classList.remove("hidden");
+  chat.followupContainer.classList.remove("hidden");
+  chat.upvoteBtn.classList.remove("active");
+  chat.downvoteBtn.classList.remove("active");
+  renderFollowups(chat.container.querySelector('.user-query').textContent);
+
+  chat.copyBtn.addEventListener("click", () => {
+    navigator.clipboard.writeText(chat.summary.innerText);
+    chat.copyText.textContent = "已复制";
+    chat.copyBtn.style.color = "#0071e3";
+    setTimeout(() => {
+      chat.copyText.textContent = "复制";
+      chat.copyBtn.style.color = "#1d1d1f";
+    }, 2000);
+  });
+
+  chat.upvoteBtn.addEventListener("click", () => {
+    chat.upvoteBtn.classList.toggle("active");
+    chat.downvoteBtn.classList.remove("active");
+  });
+
+  chat.downvoteBtn.addEventListener("click", () => {
+    chat.downvoteBtn.classList.toggle("active");
+    chat.upvoteBtn.classList.remove("active");
+  });
+}
+
+function createChatItem(query) {
+  const clone = nodes.chatItemTemplate.content.cloneNode(true);
+  const container = clone.querySelector('.chat-item');
+  clone.querySelector('.user-query').textContent = query;
+  nodes.chatHistory.appendChild(clone);
+
+  const drawerBtns = container.querySelectorAll("[data-drawer]");
+  drawerBtns.forEach(btn => {
+    btn.addEventListener("click", () => {
+      const payload = container._payload || (state.currentChat && state.currentChat.container === container ? state.currentChat.payload : null);
+      if (payload) populateDrawers(payload);
+      showDrawer(btn.dataset.drawer);
+    });
+  });
+
+  setTimeout(() => {
+    nodes.chatHistory.scrollTo({
+      top: nodes.chatHistory.scrollHeight,
+      behavior: 'smooth'
+    });
+  }, 50);
+
+  const chatObj = {
+    container,
+    payload: null,
+    thinking: container.querySelector('.thinking'),
+    statusText: container.querySelector('.status-text'),
+    progressSteps: container.querySelector('.progress-steps'),
+    summary: container.querySelector('.answer-text'),
+    insights: container.querySelector('.insight-list'),
+    feedbackBar: container.querySelector('.feedback-toolbar'),
+    copyBtn: container.querySelector('.copy-btn'),
+    copyText: container.querySelector('.copy-text'),
+    upvoteBtn: container.querySelector('.upvote-btn'),
+    downvoteBtn: container.querySelector('.downvote-btn'),
+    followupContainer: container.querySelector('.followup-container'),
+    followupList: container.querySelector('.followup-list'),
+    resultActions: container.querySelector('.result-actions'),
+    resultCount: container.querySelector('.result-count'),
+    latencyBadge: container.querySelector('.latency')
+  };
+  container._payloadLink = chatObj;
+  return chatObj;
+}
+
 async function runResearch() {
-  if (state.running) return;
+  if (state.running) {
+    if (state.abortController) state.abortController.abort();
+    return;
+  }
+
   const query = nodes.query.value.trim() || DEFAULT_QUERY;
-  nodes.query.value = query;
+
+  if (!state.hasResult) {
+    nodes.query.disabled = true;
+    nodes.submit.disabled = true;
+    const heroText = document.querySelector('.initial-hero .answer-text');
+    if (heroText) {
+      let text = heroText.textContent;
+      await new Promise(resolve => {
+        const deleteTimer = setInterval(() => {
+          if (text.length > 0) {
+            text = text.slice(0, -1);
+            heroText.textContent = text;
+          } else {
+            clearInterval(deleteTimer);
+            nodes.query.disabled = false;
+            nodes.submit.disabled = false;
+            resolve();
+          }
+        }, 30);
+      });
+    }
+  }
+
+  state.abortController = new AbortController();
+
+  const dock = nodes.dockContainer;
+  const first = dock.getBoundingClientRect();
+
+  state.currentChat = createChatItem(query);
+  nodes.query.value = "";
+
   const params = new URLSearchParams({
     q: query,
     online: nodes.online.checked ? "true" : "false",
@@ -320,15 +508,96 @@ async function runResearch() {
     limit: "8",
   });
 
-  nodes.status.textContent = nodes.online.checked ? "正在研究在线资料" : "正在研究本地资料";
   setBusy(true);
+
+  if (!state.hasResultBefore) {
+    state.hasResultBefore = true;
+    const last = dock.getBoundingClientRect();
+    const invertX = first.left - last.left;
+    const invertY = first.top - last.top;
+
+    dock.style.transform = `translate(${invertX}px, ${invertY}px)`;
+    dock.style.transition = "none";
+
+    requestAnimationFrame(() => {
+      dock.style.transform = "";
+      dock.style.transition = "transform 0.6s cubic-bezier(0.2, 0.8, 0.2, 1)";
+    });
+  }
+
+  const startTime = Date.now();
+  let textBuffer = "";
+
   try {
-    const response = await fetch(`/api/research?${params}`);
+    params.set("stream", "true");
+    const response = await fetch(`/api/research?${params}`, { signal: state.abortController.signal });
     if (!response.ok) throw new Error(`HTTP ${response.status}`);
-    renderResearch(await response.json());
+
+    const reader = response.body.getReader();
+    const decoder = new TextDecoder("utf-8");
+    let done = false;
+    let payload = null;
+
+    while (!done) {
+      const { value, done: readerDone } = await reader.read();
+      done = readerDone;
+      if (value) {
+        const chunkStr = decoder.decode(value, { stream: true });
+        const lines = chunkStr.split("\n");
+        for (const line of lines) {
+          if (line.startsWith("data: ")) {
+            try {
+              const event = JSON.parse(line.substring(6));
+
+              if (event.type === "status") {
+                const elapsed = Math.floor((Date.now() - startTime) / 1000);
+                if (state.currentChat) {
+                  state.currentChat.statusText.textContent = `深度研究进行中 (${elapsed}s)`;
+                  const li = document.createElement("li");
+                  li.style.animation = "answerBlockIn 0.3s cubic-bezier(0.2, 0.8, 0.2, 1) forwards";
+                  li.innerHTML = `<span style="color: var(--teal); margin-right: 6px;">✓</span> <span>${escapeHtml(event.message)}</span>`;
+                  state.currentChat.progressSteps.appendChild(li);
+
+                  if (state.autoFollowAnswer) {
+                    nodes.chatHistory.scrollTop = nodes.chatHistory.scrollHeight;
+                  }
+                }
+              } else if (event.type === "chunk") {
+                textBuffer += event.chunk;
+                const lastLine = textBuffer.split("\n").filter(l => l.trim().length > 0).pop() || "";
+                const displayLine = lastLine.replace(/[#*`>{}\[\]]/g, "").trim();
+                const shortDisplay = displayLine.length > 50 ? displayLine.substring(displayLine.length - 50) : displayLine;
+                if (shortDisplay && state.currentChat) {
+                  state.currentChat.summary.innerHTML = `<span style="color: #86868b; font-style: italic;">正在思考：${shortDisplay}</span>`;
+                }
+              } else if (event.type === "complete") {
+                payload = event.result;
+              } else if (event.type === "error") {
+                throw new Error(event.message);
+              }
+            } catch (e) {
+              // ignore parse errors for partial chunks
+            }
+          }
+        }
+      }
+    }
+
+    if (payload) {
+      if (state.currentChat) state.currentChat.container._payload = payload;
+      renderResearch(payload);
+    }
   } catch (error) {
-    nodes.status.textContent = `请求失败：${error.message}`;
+    if (error.name === 'AbortError') {
+      if (state.currentChat) state.currentChat.statusText.textContent = "研究已终止";
+    } else {
+      console.error(error);
+      if (state.currentChat) state.currentChat.statusText.textContent = "研究发生错误";
+    }
   } finally {
+    if (state.currentChat && state.currentChat.statusText.textContent !== "研究已终止" && state.currentChat.statusText.textContent !== "研究发生错误") {
+      state.currentChat.thinking.classList.add("hidden");
+    }
     setBusy(false);
   }
 }
@@ -471,10 +740,7 @@ async function loadHealth() {
     const stats = payload.stats || {};
     nodes.docCount.textContent = `${stats.documents ?? "-"} docs · ${stats.vocabulary ?? "-"} terms`;
     renderModelState(payload.llm);
-    nodes.status.textContent = "系统就绪";
-  } catch (error) {
-    nodes.status.textContent = "后端未连接";
-  }
+  } catch (error) {}
 }
 
 async function loadSources() {
@@ -497,21 +763,15 @@ function restoreLocalSettings() {
   applyProviderDefaults();
 }
 
-nodes.form.addEventListener("submit", (event) => {
-  event.preventDefault();
+nodes.form.addEventListener("submit", (e) => {
+  e.preventDefault();
+  nodes.drawerOverlay.click();
   runResearch();
 });
 
-nodes.answerStage.addEventListener("wheel", () => {
-  state.autoFollowAnswer = false;
-}, { passive: true });
-
-nodes.answerStage.addEventListener("touchmove", () => {
-  state.autoFollowAnswer = false;
-}, { passive: true });
 
 nodes.online.addEventListener("change", () => {
-  nodes.status.textContent = nodes.online.checked ? "在线资料已打开" : "在线资料已关闭";
+  // Toggle doesn't need to show status text anymore
 });
 
 nodes.provider.addEventListener("change", applyProviderDefaults);

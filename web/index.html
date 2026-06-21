@@ -29,6 +29,11 @@
         </div>
 
         <div class="top-actions">
+          <label class="toggle-switch">
+            <input id="onlineToggle" type="checkbox" checked />
+            <span class="toggle-slider"></span>
+            <span>在线资料</span>
+          </label>
           <span id="docCount" class="pill">- docs</span>
           <span id="modelState" class="pill">本地 fallback</span>
           <button type="button" class="ghost-btn" data-drawer="sources">在线源</button>
@@ -36,43 +41,71 @@
         </div>
       </header>
 
-      <section class="command-float">
-        <form id="searchForm" class="query-form">
-          <input id="queryInput" autocomplete="off" />
-          <button id="submitBtn" type="submit">研究</button>
-        </form>
-        <div class="command-meta">
-          <label class="toggle-switch">
-            <input id="onlineToggle" type="checkbox" checked />
-            <span class="toggle-slider"></span>
-            <span>在线资料</span>
-          </label>
-          <span id="statusText">初始化中</span>
-        </div>
-      </section>
+      <div id="dockContainer" class="dock-container">
+        <section class="command-float" id="commandFloat">
+          <form id="searchForm" class="query-form">
+            <input id="queryInput" autocomplete="off" placeholder="探索未知的知识..." />
+            <button id="submitBtn" type="submit">研究</button>
+          </form>
+        </section>
+      </div>
 
-      <section class="answer-stage" aria-label="研究答案">
-        <div id="loadingState" class="thinking hidden">
-          <span></span>
-          <span></span>
-          <span></span>
-          <p>研究中</p>
+      <div id="chatHistory" class="chat-history" aria-label="研究对话">
+        <div id="initialHero" class="initial-hero">
+          <div class="answer-text">输入问题后开始研究。</div>
         </div>
-        <div id="summaryText" class="answer-text">输入问题后开始研究。</div>
-        <ul id="insightList" class="insight-list"></ul>
-      </section>
-
-      <nav id="resultActions" class="result-actions hidden" aria-label="研究结果操作">
-        <button type="button" class="result-btn" data-drawer="evidence">
-          <span>证据</span>
-          <strong id="resultCount">0</strong>
-        </button>
-        <button type="button" class="result-btn" data-drawer="plan">计划</button>
-        <button type="button" class="result-btn" data-drawer="trace">过程</button>
-        <button type="button" class="result-btn" data-drawer="quality">质量</button>
-        <span id="latencyBadge" class="latency">- ms</span>
-      </nav>
+      </div>
     </main>
+
+    <template id="chatItemTemplate">
+      <div class="chat-item">
+        <div class="user-bubble">
+          <h2 class="user-query"></h2>
+        </div>
+        <div class="ai-bubble answer-stage">
+          <div class="thinking hidden">
+            <div style="display: flex; align-items: center; gap: 10px; font-weight: 600; color: var(--blue);">
+              <span></span><span></span><span></span>
+              <p class="status-text" style="margin:0;">初始化研究流程...</p>
+            </div>
+            <ul class="progress-steps" style="list-style: none; padding-left: 16px; margin: 12px 0 12px 6px; border-left: 2px solid rgba(0, 113, 227, 0.2); font-size: 14px; color: var(--muted); display: grid; gap: 8px;"></ul>
+          </div>
+          <div class="answer-text"></div>
+          <ul class="insight-list"></ul>
+
+          <div class="feedback-toolbar hidden">
+            <button type="button" class="icon-btn copy-btn" aria-label="复制结果">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path></svg>
+              <span class="btn-text copy-text">复制</span>
+            </button>
+            <div class="feedback-votes">
+              <button type="button" class="icon-btn vote-btn upvote-btn" aria-label="有用">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 9V5a3 3 0 0 0-3-3l-4 9v11h11.28a2 2 0 0 0 2-1.7l1.38-9a2 2 0 0 0-2-2.3zM7 22H4a2 2 0 0 1-2-2v-7a2 2 0 0 1 2-2h3"></path></svg>
+              </button>
+              <button type="button" class="icon-btn vote-btn downvote-btn" aria-label="无用">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M10 15v4a3 3 0 0 0 3 3l4-9V2H5.72a2 2 0 0 0-2 1.7l-1.38 9a2 2 0 0 0 2 2.3zm7-13h3a2 2 0 0 1 2 2v7a2 2 0 0 1-2 2h-3"></path></svg>
+              </button>
+            </div>
+          </div>
+
+          <div class="followup-container hidden">
+            <p class="followup-title">继续探索：</p>
+            <div class="followup-list"></div>
+          </div>
+
+          <nav class="result-actions hidden" aria-label="研究结果操作">
+            <button type="button" class="result-btn drawer-btn" data-drawer="evidence">
+              <span>证据</span>
+              <strong class="result-count">0</strong>
+            </button>
+            <button type="button" class="result-btn drawer-btn" data-drawer="plan">计划</button>
+            <button type="button" class="result-btn drawer-btn" data-drawer="trace">过程</button>
+            <button type="button" class="result-btn drawer-btn" data-drawer="quality">质量</button>
+            <span class="latency">- ms</span>
+          </nav>
+        </div>
+      </div>
+    </template>
 
     <div id="drawerOverlay" class="drawer-overlay hidden">
       <aside class="drawer" aria-label="详细面板">

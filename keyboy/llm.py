@@ -9,7 +9,7 @@ from dataclasses import dataclass
 from typing import Any
 
 
-@dataclass(slots=True)
+@dataclass
 class LLMResult:
     text: str
     model: str
@@ -90,7 +90,14 @@ class LLMProvider:
             return "qwen3.7-max"
         return "openai-compatible-model"
 
-    def chat(self, messages: list[dict[str, str]], *, temperature: float = 0.2, max_tokens: int = 1200) -> LLMResult:
+    def chat(
+        self,
+        messages: list[dict[str, str]],
+        *,
+        temperature: float = 0.2,
+        max_tokens: int = 1200,
+        on_chunk: Any = None,
+    ) -> LLMResult:
         if not self.enabled:
             return LLMResult(
                 text="",
@@ -107,6 +114,8 @@ class LLMProvider:
         }
         if os.getenv("KEYBOY_LLM_ENABLE_THINKING"):
             payload["enable_thinking"] = os.getenv("KEYBOY_LLM_ENABLE_THINKING", "").lower() not in {"0", "false", "no"}
+        if on_chunk:
+            payload["stream"] = True
         data = json.dumps(payload, ensure_ascii=False).encode("utf-8")
         request = urllib.request.Request(
             f"{self.base_url}/chat/completions",
@@ -119,9 +128,26 @@ class LLMProvider:
         )
         try:
             with urllib.request.urlopen(request, timeout=self.timeout) as response:
-                raw = json.loads(response.read().decode("utf-8"))
-            text = raw["choices"][0]["message"]["content"]
-            return LLMResult(text=text, model=self.model, provider=self.base_url, used_remote_model=True, raw=raw)
+                if on_chunk:
+                    text_parts = []
+                    for line in response:
+                        line_str = line.decode("utf-8").strip()
+                        if line_str.startswith("data: ") and line_str != "data: [DONE]":
+                            try:
+                                chunk = json.loads(line_str[6:])
+                                delta = chunk.get("choices", [{}])[0].get("delta", {})
+                                content = delta.get("content", "")
+                                if content:
+                                    text_parts.append(content)
+                                    on_chunk(content)
+                            except json.JSONDecodeError:
+                                pass
+                    text = "".join(text_parts)
+                    return LLMResult(text=text, model=self.model, provider=self.base_url, used_remote_model=True, raw={})
+                else:
+                    raw = json.loads(response.read().decode("utf-8"))
+                    text = raw["choices"][0]["message"]["content"]
+                    return LLMResult(text=text, model=self.model, provider=self.base_url, used_remote_model=True, raw=raw)
         except Exception as exc:
             return LLMResult(
                 text=f"LLM call failed: {exc}",
@@ -130,8 +156,14 @@ class LLMProvider:
                 used_remote_model=False,
             )
 
-    def chat_json(self, messages: list[dict[str, str]], *, fallback: dict[str, Any]) -> tuple[dict[str, Any], LLMResult]:
-        result = self.chat(messages, temperature=0.1, max_tokens=1300)
+    def chat_json(
+        self,
+        messages: list[dict[str, str]],
+        *,
+        fallback: dict[str, Any],
+        on_chunk: Any = None,
+    ) -> tuple[dict[str, Any], LLMResult]:
+        result = self.chat(messages, temperature=0.1, max_tokens=1300, on_chunk=on_chunk)
         if not result.used_remote_model:
             return fallback, result
 

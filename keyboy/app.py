@@ -2,11 +2,18 @@ from __future__ import annotations
 
 import argparse
 import json
-import mimetypes
-from http import HTTPStatus
-from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
-from urllib.parse import parse_qs, urlparse
+import queue
+import threading
+from typing import Any, Optional
+
+import uvicorn
+from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import Response
+from fastapi.staticfiles import StaticFiles
+from pydantic import BaseModel
+from sse_starlette.sse import EventSourceResponse
+from fastapi import FastAPI
 
 from .agentic import AgenticKeyBoySystem
 from .agents import KeyBoySystem
@@ -17,156 +24,191 @@ WEB_ROOT = ROOT / "web"
 SYSTEM = KeyBoySystem()
 AGENTIC_SYSTEM = AgenticKeyBoySystem()
 
+app = FastAPI()
 
-class KeyBoyHandler(BaseHTTPRequestHandler):
-    server_version = "KeyBoy/2.0"
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 
-    def log_message(self, format: str, *args) -> None:
-        return
 
-    def _json(self, payload, status: int = 200) -> None:
-        body = json.dumps(payload, ensure_ascii=False).encode("utf-8")
-        self.send_response(status)
-        self.send_header("Content-Type", "application/json; charset=utf-8")
-        self.send_header("Content-Length", str(len(body)))
-        self.send_header("Access-Control-Allow-Origin", "*")
-        self.end_headers()
-        self.wfile.write(body)
+class LLMConfig(BaseModel):
+    provider: str = "bailian"
+    base_url: str = ""
+    model: str = ""
+    api_key: str = ""
+    timeout: Any = None
+    enable_thinking: Optional[bool] = None
 
-    def _read_json(self) -> dict:
-        length = int(self.headers.get("Content-Length") or "0")
-        if length <= 0:
-            return {}
-        raw = self.rfile.read(length).decode("utf-8")
-        try:
-            payload = json.loads(raw)
-        except json.JSONDecodeError:
-            return {}
-        return payload if isinstance(payload, dict) else {}
 
-    def _static(self, relative: str) -> None:
-        target = (WEB_ROOT / relative.lstrip("/")).resolve()
-        if WEB_ROOT.resolve() not in target.parents and target != WEB_ROOT.resolve():
-            self.send_error(HTTPStatus.FORBIDDEN)
-            return
-        if target.is_dir():
-            target = target / "index.html"
-        if not target.exists():
-            self.send_error(HTTPStatus.NOT_FOUND)
-            return
-        content_type = mimetypes.guess_type(str(target))[0] or "application/octet-stream"
-        body = target.read_bytes()
-        self.send_response(HTTPStatus.OK)
-        self.send_header("Content-Type", content_type)
-        self.send_header("Content-Length", str(len(body)))
-        self.end_headers()
-        self.wfile.write(body)
+class SourcesConfig(BaseModel):
+    semantic_scholar_api_key: str = ""
+    openalex_api_key: str = ""
+    openalex_mailto: str = ""
+    crossref_mailto: str = ""
+    timeout: Any = None
+    per_source_limit: Any = None
 
-    def do_OPTIONS(self) -> None:
-        self.send_response(HTTPStatus.NO_CONTENT)
-        self.send_header("Access-Control-Allow-Origin", "*")
-        self.send_header("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
-        self.send_header("Access-Control-Allow-Headers", "Content-Type")
-        self.end_headers()
 
-    def do_GET(self) -> None:
-        parsed = urlparse(self.path)
-        query = parse_qs(parsed.query)
-        if parsed.path == "/api/health":
-            SYSTEM.ensure_ready()
-            assert SYSTEM.index is not None
-            self._json(
-                {
-                    "status": "ok",
-                    "stats": SYSTEM.index.stats(),
-                    "evaluation": SYSTEM.eval_metrics,
-                    "llm": AGENTIC_SYSTEM.llm.safe_config(),
-                }
-            )
-            return
-        if parsed.path == "/api/config/llm":
-            self._json(AGENTIC_SYSTEM.llm.safe_config())
-            return
-        if parsed.path == "/api/config/sources":
-            self._json(AGENTIC_SYSTEM.discovery_agent.client.safe_config())
-            return
-        if parsed.path == "/api/search":
-            q = query.get("q", [""])[0]
-            mode = query.get("mode", ["hybrid"])[0]
-            source = query.get("source", [""])[0]
-            category = query.get("category", [""])[0]
-            limit = int(query.get("limit", ["8"])[0])
-            response = SYSTEM.search(q, mode=mode, source=source, category=category, limit=limit)
-            self._json(response.to_dict())
-            return
-        if parsed.path == "/api/research":
-            q = query.get("q", [""])[0]
-            online = query.get("online", ["true"])[0].lower() not in {"0", "false", "no"}
-            include_local = query.get("include_local", ["true"])[0].lower() not in {"0", "false", "no"}
-            limit = int(query.get("limit", ["10"])[0])
-            response = AGENTIC_SYSTEM.research(q, online=online, include_local=include_local, limit=limit)
-            self._json(response.to_dict())
-            return
-        if parsed.path == "/api/metrics":
-            SYSTEM.ensure_ready()
-            assert SYSTEM.index is not None
-            self._json({"stats": SYSTEM.index.stats(), "evaluation": SYSTEM.eval_metrics, "traces": [t.to_dict() for t in SYSTEM.traces]})
-            return
-        self._static("index.html" if parsed.path == "/" else parsed.path)
+def parse_float(value: Any) -> float | None:
+    if value in (None, ""):
+        return None
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return None
 
-    def do_POST(self) -> None:
-        parsed = urlparse(self.path)
-        if parsed.path == "/api/config/llm":
-            payload = self._read_json()
-            provider = str(payload.get("provider") or "bailian")
-            base_url = str(payload.get("base_url") or "").strip()
-            model = str(payload.get("model") or "").strip()
-            api_key = str(payload.get("api_key") or "").strip()
-            timeout_value = payload.get("timeout")
-            timeout = None
-            if timeout_value not in (None, ""):
-                try:
-                    timeout = float(timeout_value)
-                except (TypeError, ValueError):
-                    timeout = None
-            if provider == "bailian" and not base_url:
-                base_url = "https://dashscope.aliyuncs.com/compatible-mode/v1"
-            if provider == "bailian" and not model:
-                model = "qwen-plus"
-            AGENTIC_SYSTEM.llm.configure(
-                api_key=api_key,
-                base_url=base_url,
-                model=model,
-                timeout=timeout,
-                enable_thinking=bool(payload.get("enable_thinking")),
-            )
-            self._json({"status": "ok", "llm": AGENTIC_SYSTEM.llm.safe_config()})
-            return
-        if parsed.path == "/api/config/sources":
-            payload = self._read_json()
-            timeout = None
-            per_source_limit = None
-            if payload.get("timeout") not in (None, ""):
-                try:
-                    timeout = float(payload.get("timeout"))
-                except (TypeError, ValueError):
-                    timeout = None
-            if payload.get("per_source_limit") not in (None, ""):
-                try:
-                    per_source_limit = int(payload.get("per_source_limit"))
-                except (TypeError, ValueError):
-                    per_source_limit = None
-            AGENTIC_SYSTEM.discovery_agent.client.configure(
-                semantic_scholar_api_key=str(payload.get("semantic_scholar_api_key") or ""),
-                openalex_api_key=str(payload.get("openalex_api_key") or ""),
-                openalex_mailto=str(payload.get("openalex_mailto") or ""),
-                crossref_mailto=str(payload.get("crossref_mailto") or ""),
-                timeout=timeout,
-                per_source_limit=per_source_limit,
-            )
-            self._json({"status": "ok", "sources": AGENTIC_SYSTEM.discovery_agent.client.safe_config()})
-            return
-        self.send_error(HTTPStatus.NOT_FOUND)
+
+def parse_int(value: Any) -> int | None:
+    if value in (None, ""):
+        return None
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return None
+
+
+@app.on_event("startup")
+def startup_event():
+    SYSTEM.bootstrap()
+
+
+@app.options("/{full_path:path}")
+def options_preflight(full_path: str):
+    return Response(
+        status_code=204,
+        headers={
+            "Access-Control-Allow-Origin": "*",
+            "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
+            "Access-Control-Allow-Headers": "Content-Type",
+        },
+    )
+
+
+@app.get("/api/health")
+def health():
+    SYSTEM.ensure_ready()
+    assert SYSTEM.index is not None
+    return {
+        "status": "ok",
+        "stats": SYSTEM.index.stats(),
+        "evaluation": SYSTEM.eval_metrics,
+        "llm": AGENTIC_SYSTEM.llm.safe_config(),
+    }
+
+
+@app.get("/api/config/llm")
+def get_llm_config():
+    return AGENTIC_SYSTEM.llm.safe_config()
+
+
+@app.post("/api/config/llm")
+def post_llm_config(config: Optional[LLMConfig] = None):
+    config = config or LLMConfig()
+    provider = config.provider
+    base_url = config.base_url.strip()
+    model = config.model.strip()
+    api_key = config.api_key.strip()
+
+    if provider == "bailian" and not base_url:
+        base_url = "https://dashscope.aliyuncs.com/compatible-mode/v1"
+    if provider == "bailian" and not model:
+        model = "qwen-plus"
+
+    AGENTIC_SYSTEM.llm.configure(
+        api_key=api_key,
+        base_url=base_url,
+        model=model,
+        timeout=parse_float(config.timeout),
+        enable_thinking=config.enable_thinking,
+    )
+    return {"status": "ok", "llm": AGENTIC_SYSTEM.llm.safe_config()}
+
+
+@app.get("/api/config/sources")
+def get_sources_config():
+    return AGENTIC_SYSTEM.discovery_agent.client.safe_config()
+
+
+@app.post("/api/config/sources")
+def post_sources_config(config: Optional[SourcesConfig] = None):
+    config = config or SourcesConfig()
+    AGENTIC_SYSTEM.discovery_agent.client.configure(
+        semantic_scholar_api_key=config.semantic_scholar_api_key,
+        openalex_api_key=config.openalex_api_key,
+        openalex_mailto=config.openalex_mailto,
+        crossref_mailto=config.crossref_mailto,
+        timeout=parse_float(config.timeout),
+        per_source_limit=parse_int(config.per_source_limit),
+    )
+    return {"status": "ok", "sources": AGENTIC_SYSTEM.discovery_agent.client.safe_config()}
+
+
+@app.get("/api/search")
+def search(q: str = "", mode: str = "hybrid", source: str = "", category: str = "", limit: int = 8):
+    response = SYSTEM.search(q, mode=mode, source=source, category=category, limit=limit)
+    return response.to_dict()
+
+
+@app.get("/api/metrics")
+def metrics():
+    SYSTEM.ensure_ready()
+    assert SYSTEM.index is not None
+    return {
+        "stats": SYSTEM.index.stats(),
+        "evaluation": SYSTEM.eval_metrics,
+        "traces": [t.to_dict() for t in SYSTEM.traces]
+    }
+
+
+@app.get("/api/status")
+def status():
+    status_msg = getattr(AGENTIC_SYSTEM, "current_status", "")
+    stream_buf = getattr(AGENTIC_SYSTEM, "llm_stream_buffer", "")
+    return {"status": status_msg, "stream_buffer": stream_buf}
+
+
+@app.get("/api/research")
+def research_endpoint(q: str = "", online: str = "true", include_local: str = "true", limit: int = 10, stream: str = "false"):
+    is_online = online.lower() not in {"0", "false", "no"}
+    is_include_local = include_local.lower() not in {"0", "false", "no"}
+
+    if stream.lower() not in {"0", "false", "no"}:
+        q_queue = queue.Queue()
+
+        def run_research():
+            try:
+                result = AGENTIC_SYSTEM.research(q, online=is_online, include_local=is_include_local, limit=limit, on_event=q_queue.put)
+                q_queue.put({"type": "complete", "result": result.to_dict()})
+            except Exception as e:
+                q_queue.put({"type": "error", "message": str(e)})
+            finally:
+                q_queue.put(None)
+
+        threading.Thread(target=run_research).start()
+
+        def event_generator():
+            while True:
+                event = q_queue.get()
+                if event is None:
+                    break
+                yield {"data": json.dumps(event, ensure_ascii=False)}
+
+        return EventSourceResponse(event_generator())
+    else:
+        response = AGENTIC_SYSTEM.research(q, online=is_online, include_local=is_include_local, limit=limit)
+        return response.to_dict()
+
+
+@app.api_route("/api/{full_path:path}", methods=["GET", "POST", "PUT", "PATCH", "DELETE"])
+def unknown_api(full_path: str):
+    return Response(status_code=404)
+
+
+app.mount("/", StaticFiles(directory=WEB_ROOT, html=True), name="web")
 
 
 def main() -> None:
@@ -174,11 +216,8 @@ def main() -> None:
     parser.add_argument("--host", default="127.0.0.1")
     parser.add_argument("--port", default=8787, type=int)
     args = parser.parse_args()
-    SYSTEM.bootstrap()
-    server = ThreadingHTTPServer((args.host, args.port), KeyBoyHandler)
     print(f"KeyBoy running at http://{args.host}:{args.port}")
-    server.serve_forever()
-
+    uvicorn.run("keyboy.app:app", host=args.host, port=args.port, reload=True)
 
 if __name__ == "__main__":
     main()

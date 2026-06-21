@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import os
 import time
 from collections import Counter
@@ -99,19 +100,20 @@ class ResearchPlannerAgent:
         self.llm = llm
 
     @traced("ResearchPlannerAgent")
-    def plan(self, query: str) -> Any:
+    def plan(self, query: str, on_chunk: Any = None) -> Any:
         fallback = self._fallback_plan(query)
         messages = [
             {
                 "role": "system",
                 "content": (
                     "You are a research planning agent for an online LLM multi-agent search system. "
-                    "Return strict JSON with intent, subqueries, source_plan, required_evidence."
+                    "Return strict JSON with intent, subqueries, source_plan, required_evidence. "
+                    "Always output the values in Chinese."
                 ),
             },
             {"role": "user", "content": query},
         ]
-        parsed, llm_result = self.llm.chat_json(messages, fallback=fallback.__dict__)
+        parsed, llm_result = self.llm.chat_json(messages, fallback=fallback.__dict__, on_chunk=on_chunk)
         plan = ResearchPlan(
             intent=str(parsed.get("intent") or fallback.intent),
             subqueries=[str(x) for x in parsed.get("subqueries", fallback.subqueries)][:6],
@@ -167,7 +169,7 @@ class OnlineDiscoveryAgent:
         self.client = client or OnlineSourceClient()
 
     @traced("OnlineDiscoveryAgent")
-    def discover(self, plan: ResearchPlan, *, online: bool = True) -> Any:
+    def discover(self, plan: ResearchPlan, *, online: bool = True, on_progress: Any = None) -> Any:
         if not online:
             return type(
                 "AgentResult",
@@ -181,7 +183,9 @@ class OnlineDiscoveryAgent:
         except ValueError:
             max_queries = 1
         for subquery in plan.subqueries[:max_queries]:
-            found, source_warnings = self.client.search(subquery, plan.source_plan)
+            if on_progress:
+                on_progress(f"发现在线资料: 准备查询 '{subquery}'")
+            found, source_warnings = self.client.search(subquery, plan.source_plan, on_progress=on_progress)
             docs.extend(found)
             warnings.extend(source_warnings)
         unique: dict[str, SearchDocument] = {}
@@ -243,7 +247,7 @@ class SynthesisAgent:
         self.llm = llm
 
     @traced("SynthesisAgent")
-    def synthesize(self, query: str, hits) -> Any:
+    def synthesize(self, query: str, hits, on_chunk: Any = None) -> Any:
         citations = []
         context_blocks = []
         for idx, hit in enumerate(hits[:8], start=1):
@@ -284,7 +288,18 @@ class SynthesisAgent:
             },
             {"role": "user", "content": f"问题：{query}\n\n证据：\n" + "\n\n".join(context_blocks)},
         ]
-        llm_result = self.llm.chat(messages, temperature=0.2, max_tokens=1500)
+        if not self.llm.enabled and on_chunk:
+            import time
+            on_chunk("启动本地确定性信息抽取模块...\n")
+            time.sleep(0.4)
+            for finding in fallback_findings[:3]:
+                on_chunk(f"提取核心观点：{finding[:20]}...\n")
+                time.sleep(0.4)
+            on_chunk("正在整合结构化段落...\n")
+            time.sleep(0.4)
+            on_chunk("本地合成完毕。\n")
+
+        llm_result = self.llm.chat(messages, temperature=0.3, max_tokens=1800, on_chunk=on_chunk)
         answer = llm_result.text if llm_result.used_remote_model else fallback_answer
         payload = {
             "answer": answer,
@@ -329,7 +344,7 @@ class StrategyAgent:
     ) -> Any:
         citations = synth.get("citations", [])
         trust_score = self._trust_score(citations, risks, bool(synth.get("llm_used")))
-        knowledge_map = self._knowledge_map(hits)
+        knowledge_map = self._knowledge_map(query, hits)
         decision_brief = {
             "user_need": self._infer_user_need(query),
             "recommended_path": self._recommended_path(query, plan, citations, trust_score),
@@ -449,7 +464,7 @@ class StrategyAgent:
         }
 
     @staticmethod
-    def _knowledge_map(hits) -> dict[str, Any]:
+    def _knowledge_map(query: str, hits) -> dict[str, Any]:
         concept_counter: Counter[str] = Counter()
         concept_sources: dict[str, set[str]] = {}
         source_counter: Counter[str] = Counter()
@@ -521,6 +536,49 @@ class StrategyAgent:
         return questions[:4]
 
 
+class EvaluatorAgent:
+    def __init__(self, llm: LLMProvider) -> None:
+        self.llm = llm
+
+    @traced("EvaluatorAgent")
+    def evaluate(self, query: str, hits) -> Any:
+        if not self.llm.enabled:
+            sources = {hit.document.source for hit in hits}
+            if len(sources) >= 2 and len(hits) >= 3:
+                payload = {"sufficient": True, "new_subqueries": []}
+            else:
+                payload = {"sufficient": False, "new_subqueries": [f"{query} supplementary review evidence"]}
+            return type("AgentResult", (), {"payload": payload, "trace_message": "启发式评估"})()
+
+        context_snippets = "\n".join(
+            f"来源: {hit.document.source}\n摘要: {hit.document.content[:150]}"
+            for hit in hits[:5]
+        )
+        prompt = f"""评估以下检索到的证据是否足以回答用户的研究主题。
+主题: {query}
+证据片段:
+{context_snippets}
+
+如果证据充足，请返回: {{"sufficient": true, "new_subqueries": []}}
+如果证据不足，请返回: {{"sufficient": false, "new_subqueries": ["补充查询1", "补充查询2"]}}
+仅返回 JSON，不包含其他内容。
+"""
+        response = self.llm.chat([{"role": "user", "content": prompt}], temperature=0.1, max_tokens=500)
+        try:
+            cleaned = response.text.strip()
+            if cleaned.startswith("```json"):
+                cleaned = cleaned[7:]
+            if cleaned.startswith("```"):
+                cleaned = cleaned[3:]
+            if cleaned.endswith("```"):
+                cleaned = cleaned[:-3]
+            payload = json.loads(cleaned.strip())
+        except Exception:
+            payload = {"sufficient": True, "new_subqueries": []}
+
+        return type("AgentResult", (), {"payload": payload, "trace_message": "LLM 证据评估"})()
+
+
 @dataclass
 class AgenticKeyBoySystem:
     llm: LLMProvider = field(default_factory=LLMProvider)
@@ -528,6 +586,7 @@ class AgenticKeyBoySystem:
     index_agent: IndexAgent = field(default_factory=IndexAgent)
     planner_agent: ResearchPlannerAgent = field(init=False)
     discovery_agent: OnlineDiscoveryAgent = field(default_factory=OnlineDiscoveryAgent)
+    evaluator_agent: EvaluatorAgent = field(init=False)
     ranker_agent: EvidenceRankerAgent = field(init=False)
     synthesis_agent: SynthesisAgent = field(init=False)
     critic_agent: CriticAgent = field(default_factory=CriticAgent)
@@ -537,43 +596,94 @@ class AgenticKeyBoySystem:
         self.planner_agent = ResearchPlannerAgent(self.llm)
         self.ranker_agent = EvidenceRankerAgent(self.llm)
         self.synthesis_agent = SynthesisAgent(self.llm)
+        self.evaluator_agent = EvaluatorAgent(self.llm)
 
-    def research(self, query: str, *, online: bool = True, include_local: bool = True, limit: int = 10) -> ResearchResult:
+    def research(self, query: str, *, online: bool = True, include_local: bool = True, limit: int = 10, on_event: Any = None) -> ResearchResult:
         traces: list[AgentTrace] = []
         started = time.perf_counter()
 
-        plan_result, trace = self.planner_agent.plan(query)
+        self.llm_stream_buffer = ""
+        def handle_chunk(chunk: str):
+            self.llm_stream_buffer += chunk
+            if on_event:
+                on_event({"type": "chunk", "chunk": chunk})
+
+        def set_status(msg: str):
+            self.current_status = msg
+            handle_chunk(f"{msg}\n")
+            if on_event:
+                on_event({"type": "status", "message": msg})
+
+        set_status("正在规划研究方案...")
+        plan_result, trace = self.planner_agent.plan(query, on_chunk=handle_chunk)
         traces.append(trace)
         plan: ResearchPlan = plan_result.payload if plan_result else self.planner_agent._fallback_plan(query)
 
-        discovery_result, trace = self.discovery_agent.discover(plan, online=online)
-        traces.append(trace)
-        online_docs, source_warnings = discovery_result.payload
-        documents = list(online_docs)
+        all_documents = []
         if include_local:
-            documents.extend(load_documents())
+            all_documents.extend(load_documents())
 
-        clean_result, trace = self.clean_agent.clean(documents)
-        traces.append(trace)
-        cleaned = clean_result.payload if clean_result else []
+        all_warnings = []
+        online_document_count = 0
+        max_iterations = 2
+        iteration = 0
+        hits = []
+        index = HybridSearchIndex()
 
-        index_result, trace = self.index_agent.build(cleaned)
-        traces.append(trace)
-        index = index_result.payload if index_result else HybridSearchIndex()
+        while iteration < max_iterations:
+            iteration += 1
+            set_status(f"[第 {iteration} 轮迭代] 正在发现在线资料...")
+            discovery_result, trace = self.discovery_agent.discover(plan, online=online, on_progress=set_status)
+            traces.append(trace)
+            online_docs, source_warnings = discovery_result.payload
 
-        rank_result, trace = self.ranker_agent.rank(index, query, limit=limit)
-        traces.append(trace)
-        ranked = rank_result.payload if rank_result else {"hits": [], "profile": {}}
-        hits = ranked["hits"]
+            all_documents.extend(online_docs)
+            online_document_count += len(online_docs)
+            all_warnings.extend(source_warnings)
 
-        synth_result, trace = self.synthesis_agent.synthesize(query, hits)
+            set_status(f"[第 {iteration} 轮迭代] 正在清洗与整理文档...")
+            clean_result, trace = self.clean_agent.clean(all_documents)
+            traces.append(trace)
+            cleaned = clean_result.payload if clean_result else []
+
+            set_status(f"[第 {iteration} 轮迭代] 正在构建知识索引...")
+            index_result, trace = self.index_agent.build(cleaned)
+            traces.append(trace)
+            index = index_result.payload if index_result else HybridSearchIndex()
+
+            set_status(f"[第 {iteration} 轮迭代] 正在检索相关证据...")
+            rank_result, trace = self.ranker_agent.rank(index, query, limit=limit)
+            traces.append(trace)
+            ranked = rank_result.payload if rank_result else {"hits": [], "profile": {}}
+            hits = ranked["hits"]
+
+            if iteration < max_iterations:
+                set_status(f"[第 {iteration} 轮迭代] 评估证据是否充足...")
+                eval_result, trace = self.evaluator_agent.evaluate(query, hits)
+                traces.append(trace)
+                eval_payload = eval_result.payload
+
+                if eval_payload.get("sufficient"):
+                    set_status("证据充足，准备合成最终答案。")
+                    break
+                else:
+                    new_subs = eval_payload.get("new_subqueries", [])
+                    if not new_subs:
+                        break
+                    set_status(f"发现知识盲区，生成补充查询: {', '.join(new_subs)}")
+                    plan.subqueries = new_subs
+
+        set_status("正在合成研究答案 (调用 LLM 需时较长)...")
+        synth_result, trace = self.synthesis_agent.synthesize(query, hits, on_chunk=handle_chunk)
         traces.append(trace)
         synth = synth_result.payload if synth_result else {"answer": "", "citations": [], "findings": [], "llm_used": False, "model": ""}
 
+        set_status("正在进行批判与风险校验 (调用 LLM 需时较长)...")
         critique_result, trace = self.critic_agent.critique(synth)
         traces.append(trace)
-        risks = list(source_warnings[:4]) + (critique_result.payload if critique_result else [])
+        risks = list(all_warnings[:4]) + (critique_result.payload if critique_result else [])
 
+        set_status("正在生成最终研究简报 (调用 LLM 需时较长)...")
         strategy_result, trace = self.strategy_agent.advise(query, plan, hits, synth, risks)
         traces.append(trace)
         strategy = strategy_result.payload if strategy_result else {
@@ -587,7 +697,7 @@ class AgenticKeyBoySystem:
         latency_ms = (time.perf_counter() - started) * 1000
         metrics = {
             "latency_ms": round(latency_ms, 2),
-            "online_documents": len(online_docs),
+            "online_documents": online_document_count,
             "indexed_documents": len(cleaned),
             "result_count": len(hits),
             "llm_used": bool(synth.get("llm_used")),

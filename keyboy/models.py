@@ -10,7 +10,7 @@ def stable_id(*parts: str) -> str:
     return sha1(joined.encode("utf-8")).hexdigest()[:16]
 
 
-@dataclass(slots=True)
+@dataclass
 class SearchDocument:
     title: str
     content: str
@@ -41,7 +41,7 @@ class SearchDocument:
         return asdict(self)
 
 
-@dataclass(slots=True)
+@dataclass
 class AgentTrace:
     name: str
     status: str
@@ -52,7 +52,7 @@ class AgentTrace:
         return asdict(self)
 
 
-@dataclass(slots=True)
+@dataclass
 class SearchHit:
     document: SearchDocument
     score: float
@@ -72,7 +72,7 @@ class SearchHit:
         }
 
 
-@dataclass(slots=True)
+@dataclass
 class SearchResponse:
     query: str
     mode: str

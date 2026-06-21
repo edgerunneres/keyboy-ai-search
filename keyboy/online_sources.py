@@ -21,7 +21,7 @@ from .text import normalize_text
 ABSTRACT_TAG_RE = re.compile(r"<[^>]+>")
 
 
-@dataclass(slots=True)
+@dataclass
 class OnlinePaper:
     title: str
     abstract: str
@@ -54,6 +54,7 @@ DISPLAY_NAMES = {
     "semanticscholar": "Semantic Scholar",
     "arxiv": "arXiv",
     "crossref": "Crossref",
+    "duckduckgo": "DuckDuckGo",
 }
 
 
@@ -81,7 +82,7 @@ class OnlineSourceClient:
         if semantic_scholar_api_key is not None:
             self.semantic_scholar_api_key = semantic_scholar_api_key.strip()
         if openalex_api_key is not None:
-            self.openalex_api_key = openalex_api_key.strip()
+            self.openalex_api_key = openalex_api_key.strip() or os.getenv("OPENALEX_API_KEY", "")
         if openalex_mailto is not None:
             self.openalex_mailto = openalex_mailto.strip()
         if crossref_mailto is not None:
@@ -103,18 +104,20 @@ class OnlineSourceClient:
             "per_source_limit": self.per_source_limit,
         }
 
-    def search(self, query: str, sources: list[str] | None = None) -> tuple[list[SearchDocument], list[str]]:
+    def search(self, query: str, sources: list[str] | None = None, on_progress: Any = None) -> tuple[list[SearchDocument], list[str]]:
         if self.disabled:
             return [], ["Online source access disabled by KEYBOY_DISABLE_ONLINE=1."]
         selected = [source for source in (sources or []) if source in DISPLAY_NAMES]
         if not selected:
-            selected = ["openalex", "semanticscholar", "arxiv", "crossref"]
+            selected = ["openalex", "semanticscholar", "arxiv", "crossref", "duckduckgo"]
         documents: list[SearchDocument] = []
         warnings: list[str] = []
         with ThreadPoolExecutor(max_workers=min(4, len(selected))) as executor:
             futures = {executor.submit(self._search_source, source, query): source for source in selected}
             for future in as_completed(futures):
                 source = futures[future]
+                if on_progress:
+                    on_progress(f"发现在线资料: '{query}' -> 已返回 {DISPLAY_NAMES.get(source, source)}")
                 try:
                     papers = future.result()
                     documents.extend(paper.to_document() for paper in papers)
@@ -146,6 +149,8 @@ class OnlineSourceClient:
             return self._arxiv(query)
         if source == "crossref":
             return self._crossref(query)
+        if source == "duckduckgo":
+            return self._duckduckgo(query)
         return []
 
     @staticmethod
@@ -259,6 +264,48 @@ class OnlineSourceClient:
                     authors=[normalize_text(a.get("name", "")) for a in item.get("authors", []) if a.get("name")],
                     citation_count=int(item.get("citationCount") or 0),
                     venue=normalize_text(item.get("venue") or ""),
+                )
+            )
+        return papers
+
+    def _duckduckgo(self, query: str) -> list[OnlinePaper]:
+        params = urllib.parse.urlencode({"q": query})
+        url = f"https://html.duckduckgo.com/html/?{params}"
+        try:
+            request = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36"})
+            with urllib.request.urlopen(request, timeout=self.timeout) as response:
+                html_text = response.read().decode("utf-8", errors="ignore")
+        except Exception:
+            return []
+
+        papers: list[OnlinePaper] = []
+        pattern = re.compile(
+            r'<a class="result__url" href="([^"]+)".*?'
+            r'<h2 class="result__title">.*?<a[^>]*>(.*?)</a>.*?'
+            r'<a class="result__snippet[^"]*"[^>]*>(.*?)</a>',
+            re.DOTALL | re.IGNORECASE
+        )
+        for match in pattern.finditer(html_text):
+            if len(papers) >= self.per_source_limit:
+                break
+            url_str = urllib.parse.unquote(match.group(1).strip())
+            if url_str.startswith("//"):
+                url_str = "https:" + url_str
+            elif url_str.startswith("/"):
+                url_str = "https://duckduckgo.com" + url_str
+
+            title = self._strip_abstract(match.group(2).strip())
+            snippet = self._strip_abstract(match.group(3).strip())
+            papers.append(
+                OnlinePaper(
+                    title=title,
+                    abstract=snippet,
+                    url=url_str,
+                    source="duckduckgo",
+                    published_at=self._year_to_date(2024),
+                    authors=["Web Search"],
+                    citation_count=0,
+                    venue="Web"
                 )
             )
         return papers
