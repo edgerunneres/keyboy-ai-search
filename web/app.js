@@ -2,14 +2,23 @@ const DEFAULT_QUERY = "Agentic RAG GraphRAG LightRAG Self-RAG 最新研究怎么
 const DEFAULT_SOURCE_EMAIL = "yup300737@gmail.com";
 
 const state = {
-  running: false,
   llm: null,
   sources: null,
   hasResult: false,
   typeTimer: null,
   autoFollowAnswer: true,
   currentChat: null,
-  abortController: null,
+  currentTaskId: null,
+  activeTaskId: null,
+  currentConversationId: null,
+  currentConversationTitle: "",
+  runningTaskIds: new Set(),
+  taskRuns: new Map(),
+  chatByTaskId: new Map(),
+  conversations: [],
+  tasks: [],
+  showArchived: false,
+  restoringHistory: false,
 };
 
 const $ = (selector) => document.querySelector(selector);
@@ -32,10 +41,10 @@ const nodes = {
   modelView: $("#drawerModel"),
   sourcesView: $("#drawerSources"),
   evidenceView: $("#drawerEvidence"),
-  planView: $("#drawerPlan"),
   traceView: $("#drawerTrace"),
   qualityView: $("#drawerQuality"),
   profile: $("#profileList"),
+  qualityBrief: $("#qualityBrief"),
   quality: $("#qualityList"),
   traces: $("#traceList"),
   risks: $("#riskList"),
@@ -56,26 +65,57 @@ const nodes = {
   perSourceLimit: $("#perSourceLimitInput"),
   saveSources: $("#saveSourcesBtn"),
   sourcesMessage: $("#sourcesMessage"),
+  historyPanel: $("#historyPanel"),
+  historyToggle: $("#historyToggle"),
+  historyCollapse: $("#historyCollapse"),
+  taskList: $("#taskList"),
+  activeProjectName: $("#activeProjectName"),
+  newConversation: $("#newConversationBtn"),
+  archiveToggle: $("#archiveToggleBtn"),
+  historyModeLabel: $("#historyModeLabel"),
+  refreshHistory: $("#refreshHistoryBtn"),
 };
 
 nodes.query.placeholder = DEFAULT_QUERY;
 
 function setBusy(value) {
-  state.running = value;
-  nodes.submit.textContent = value ? "停止" : "研究";
-  nodes.form.classList.toggle("loading", value);
-  nodes.online.disabled = value;
-  $$(".top-actions .ghost-btn").forEach(btn => btn.disabled = value);
+  refreshRunningUi();
+  $$(".top-actions .ghost-btn[data-drawer]").forEach(btn => btn.disabled = false);
   if (value) {
     document.body.classList.add("has-result");
     nodes.dockContainer.classList.add("docked");
   }
 }
 
-function setResultControlsVisible(value) {
+function getCurrentConversationRunningIds() {
+  const ids = [];
+  for (const [id, run] of state.taskRuns) {
+    if (run.conversationId === state.currentConversationId && isChatVisible(run.chat)) {
+      ids.push(id);
+    }
+  }
+  return ids;
+}
+
+function refreshRunningUi() {
+  const currentRunning = getCurrentConversationRunningIds();
+  const isCurrentRunning = currentRunning.length > 0;
+  if (isCurrentRunning) {
+    nodes.submit.textContent = "停止";
+    nodes.submit.classList.add("stop-btn-active");
+  } else {
+    nodes.submit.textContent = "研究";
+    nodes.submit.classList.remove("stop-btn-active");
+  }
+  nodes.submit.disabled = false;
+  nodes.online.disabled = false;
+  nodes.form.classList.toggle("loading", isCurrentRunning);
+}
+
+function setResultControlsVisible(value, chat = state.currentChat) {
   state.hasResult = value;
-  if (state.currentChat) {
-    state.currentChat.resultActions.classList.toggle("hidden", !value);
+  if (chat) {
+    chat.resultActions.classList.toggle("hidden", !value);
   }
 }
 
@@ -127,10 +167,10 @@ function renderEvidenceSummary(value) {
   return `<ol class="answer-source-list">${items.map((item) => `<li>${formatInline(item)}</li>`).join("")}</ol>`;
 }
 
-function renderFormattedAnswer(text) {
+function renderFormattedAnswer(text, chat = state.currentChat) {
   const source = String(text || "").replace(/\r\n/g, "\n").trim();
   if (!source) {
-    nodes.summary.innerHTML = "";
+    if (chat) chat.summary.innerHTML = "";
     return;
   }
 
@@ -197,27 +237,44 @@ function renderFormattedAnswer(text) {
   flushList();
   flushParagraph();
   html += "</article>";
-  if (state.currentChat) state.currentChat.summary.innerHTML = html;
+  if (chat) chat.summary.innerHTML = html;
 }
 
-function typeAnswer(text) {
-  window.clearInterval(state.typeTimer);
-  state.typeTimer = null;
-  state.autoFollowAnswer = true;
+function scrollWithAnswer(chat, force = false, anchorNode = null) {
+  if (!chat || state.currentChat !== chat) return;
+  if (!force && !state.autoFollowAnswer) return;
+  if (anchorNode) {
+    const el = anchorNode.nodeType === Node.TEXT_NODE ? anchorNode.parentElement : anchorNode;
+    if (el) {
+      const containerRect = nodes.chatHistory.getBoundingClientRect();
+      const elRect = el.getBoundingClientRect();
+      if (elRect.bottom > containerRect.bottom - 120) {
+        nodes.chatHistory.scrollTop += elRect.bottom - containerRect.bottom + 160;
+      }
+    }
+  } else {
+    nodes.chatHistory.scrollTop = nodes.chatHistory.scrollHeight;
+  }
+}
 
-  nodes.chatHistory.style.scrollBehavior = 'auto';
+function typeAnswer(text, chat = state.currentChat) {
+  return new Promise((resolve) => {
+    if (!chat) return resolve();
+    window.clearInterval(state.typeTimer);
+    state.typeTimer = null;
+    state.autoFollowAnswer = true;
 
-  const cancelAutoScroll = () => { state.autoFollowAnswer = false; };
-  nodes.chatHistory.addEventListener('wheel', cancelAutoScroll, { once: true });
-  nodes.chatHistory.addEventListener('touchstart', cancelAutoScroll, { once: true });
+    nodes.chatHistory.style.scrollBehavior = 'auto';
 
-  const fullText = text || "没有生成答案。";
+    const cancelAutoScroll = () => { state.autoFollowAnswer = false; };
+    nodes.chatHistory.addEventListener('wheel', cancelAutoScroll, { once: true });
+    nodes.chatHistory.addEventListener('touchstart', cancelAutoScroll, { once: true });
 
-  /* Step 1: Render with the original formatter — formatting is 100% identical */
-  renderFormattedAnswer(fullText);
+    const fullText = text || "没有生成答案。";
 
-  /* Step 2: Collect all text nodes, store their content, then clear them */
-  const el = state.currentChat.summary;
+  renderFormattedAnswer(fullText, chat);
+
+  const el = chat.summary;
   const textNodes = [];
   const walker = document.createTreeWalker(el, NodeFilter.SHOW_TEXT);
   while (walker.nextNode()) {
@@ -228,7 +285,6 @@ function typeAnswer(text) {
     }
   }
 
-  /* Step 3: Type through text nodes at 60fps */
   let nIdx = 0, cIdx = 0;
 
   const tick = () => {
@@ -236,6 +292,7 @@ function typeAnswer(text) {
       nodes.chatHistory.style.scrollBehavior = '';
       nodes.chatHistory.removeEventListener('wheel', cancelAutoScroll);
       nodes.chatHistory.removeEventListener('touchstart', cancelAutoScroll);
+      resolve();
       return;
     }
 
@@ -251,20 +308,13 @@ function typeAnswer(text) {
       item.node.textContent = item.full.substring(0, cIdx);
     }
 
-    /* Smooth lerp scroll — keep typing position at ~70% from top */
-    if (state.autoFollowAnswer && state.currentChat) {
-      const containerRect = nodes.chatHistory.getBoundingClientRect();
-      const elRect = el.getBoundingClientRect();
-      const offset = containerRect.height * 0.3;
-      const gap = elRect.bottom - containerRect.bottom + offset;
-      if (gap > 0) {
-        nodes.chatHistory.scrollTop += gap * 0.15;
-      }
-    }
+    scrollWithAnswer(chat, false, item.node);
 
     requestAnimationFrame(tick);
   };
+  scrollWithAnswer(chat, true, chat.summary);
   requestAnimationFrame(tick);
+  });
 }
 
 function renderCitations(citations) {
@@ -293,7 +343,26 @@ function renderCitations(citations) {
 
     const snippet = document.createElement("p");
     snippet.className = "snippet";
-    snippet.textContent = item.evidence || "暂无摘要。";
+    snippet.textContent = item.original_excerpt || item.evidence || "暂无摘要。";
+
+    const support = document.createElement("div");
+    support.className = "evidence-support";
+    support.innerHTML = `
+      <span>支持程度：${escapeHtml(item.support_level || "中")}</span>
+      <span>${escapeHtml(item.read_status || "仅摘要")}</span>
+    `;
+
+    const claim = document.createElement("p");
+    claim.className = "evidence-claim";
+    claim.textContent = item.supporting_claim || "支撑答案中的相关判断。";
+
+    const risks = document.createElement("div");
+    risks.className = "evidence-risks";
+    (item.risk_flags || []).forEach((risk) => {
+      const badge = document.createElement("span");
+      badge.textContent = risk;
+      risks.appendChild(badge);
+    });
 
     const isWebUrl = /^https?:\/\//i.test(item.url || "");
     const source = document.createElement(isWebUrl ? "a" : "span");
@@ -305,9 +374,33 @@ function renderCitations(citations) {
       source.rel = "noreferrer";
     }
 
-    article.append(titleRow, meta, snippet, source);
+    article.append(titleRow, meta, support, claim, snippet);
+    if ((item.risk_flags || []).length) article.appendChild(risks);
+    article.appendChild(source);
     nodes.results.appendChild(article);
   });
+}
+
+function resetConversationView(message = "输入问题后开始研究。") {
+  window.clearInterval(state.typeTimer);
+  state.typeTimer = null;
+  state.currentChat = null;
+  state.hasResult = false;
+  state.hasResultBefore = false;
+  state.currentTaskId = null;
+  state.activeTaskId = null;
+  state.currentConversationId = null;
+  state.currentConversationTitle = "";
+  state.chatByTaskId.clear();
+  nodes.chatHistory.innerHTML = `
+    <div id="initialHero" class="initial-hero">
+      <div class="answer-text">${escapeHtml(message)}</div>
+    </div>
+  `;
+  document.body.classList.remove("has-result");
+  nodes.dockContainer.classList.remove("docked");
+  setResultControlsVisible(false);
+  refreshRunningUi();
 }
 
 function renderTrace(traces) {
@@ -339,23 +432,23 @@ function renderRisks(risks) {
   });
 }
 
-function renderFollowups(query) {
-  if (!state.currentChat) return;
-  state.currentChat.followupList.innerHTML = "";
-  const questions = [
+function renderFollowups(query, questions, originTaskId, chat = state.currentChat) {
+  if (!chat) return;
+  chat.followupList.innerHTML = "";
+  const fallbackQuestions = [
     `深入了解 "${query}" 的最新技术进展和论文`,
     `"${query}" 在实际工业落地中的主要痛点是什么？`,
     `是否有与 "${query}" 相关的代表性开源方案？`
   ];
-  questions.forEach(q => {
+  (questions && questions.length ? questions : fallbackQuestions).forEach(q => {
     const btn = document.createElement("button");
     btn.className = "followup-btn";
     btn.textContent = q;
     btn.onclick = () => {
       nodes.query.value = q;
-      nodes.form.dispatchEvent(new Event("submit"));
+      runResearch({ originTaskId, conversationId: chat.task?.conversation_id || state.currentConversationId });
     };
-    state.currentChat.followupList.appendChild(btn);
+    chat.followupList.appendChild(btn);
   });
 }
 
@@ -372,53 +465,62 @@ function populateDrawers(payload) {
     ["证据", (plan.required_evidence || []).join("、")],
   ]);
   const metrics = payload.metrics || {};
+  const failedAgents = (metrics.failed_agents || []).map(item => `${item.name}: ${item.message}`).join("；");
+  const brief = payload.decision_brief || {};
+  const trust = payload.trust_score || {};
+  const trustValue = trust.overall ?? trust.score ?? trust.total ?? "-";
+  nodes.qualityBrief.innerHTML = `<h3>可信决策简报</h3><dl class="brief-dl"></dl>`;
+  dl(nodes.qualityBrief.querySelector("dl"), [
+    ["用户意图", brief.user_need || "暂无"],
+    ["推荐路径", brief.recommended_path || "暂无"],
+    ["可信度", String(trustValue)],
+    ["取舍", brief.tradeoffs || brief.why_keyboy || "暂无"],
+  ]);
   dl(nodes.quality, [
     ["模型", metrics.llm_used ? metrics.llm_model : "本地 fallback"],
     ["在线文档", metrics.online_documents],
+    ["正文读取", `${metrics.source_read_success ?? 0}/${metrics.source_read_attempted ?? 0}`],
+    ["来源多样性", metrics.source_diversity ?? "-"],
+    ["引用支持率", metrics.citation_support_rate != null ? `${Math.round(metrics.citation_support_rate * 100)}%` : "-"],
     ["索引文档", metrics.indexed_documents],
     ["结果", metrics.result_count],
+    ["失败 Agent", failedAgents || "无"],
   ]);
 }
 
-function renderResearch(payload) {
-  const chat = state.currentChat;
+async function renderResearch(payload, options = {}) {
+  const chat = options.chat || state.currentChat;
   if (!chat) return;
   chat.payload = payload;
+  chat.task = options.task || chat.task || null;
+  if (chat.task?.id) chat.container.dataset.taskId = chat.task.id;
+  chat.container._payload = payload;
   chat.resultCount.textContent = String((payload.citations || []).length);
   const metrics = payload.metrics || {};
   chat.latencyBadge.textContent = `${metrics.latency_ms ?? "-"} ms`;
-  setResultControlsVisible(true);
-  typeAnswer(payload.answer || "没有生成答案。");
+  setResultControlsVisible(true, chat);
+  if (options.animate === false) {
+    renderFormattedAnswer(payload.answer || "没有生成答案。", chat);
+  } else {
+    await typeAnswer(payload.answer || "没有生成答案。", chat);
+  }
   renderList(chat.insights, payload.findings);
 
   chat.feedbackBar.classList.remove("hidden");
   chat.followupContainer.classList.remove("hidden");
   chat.upvoteBtn.classList.remove("active");
   chat.downvoteBtn.classList.remove("active");
-  renderFollowups(chat.container.querySelector('.user-query').textContent);
-
-  chat.copyBtn.addEventListener("click", () => {
-    navigator.clipboard.writeText(chat.summary.innerText);
-    chat.copyText.textContent = "已复制";
-    chat.copyBtn.style.color = "#0071e3";
-    setTimeout(() => {
-      chat.copyText.textContent = "复制";
-      chat.copyBtn.style.color = "#1d1d1f";
-    }, 2000);
-  });
-
-  chat.upvoteBtn.addEventListener("click", () => {
-    chat.upvoteBtn.classList.toggle("active");
-    chat.downvoteBtn.classList.remove("active");
-  });
-
-  chat.downvoteBtn.addEventListener("click", () => {
-    chat.downvoteBtn.classList.toggle("active");
-    chat.upvoteBtn.classList.remove("active");
-  });
+  renderFollowups(chat.container.querySelector('.user-query').textContent, payload.next_questions, chat.task?.id, chat);
 }
 
-function createChatItem(query) {
+function createChatItem(query, options = {}) {
+  const append = options.append !== false;
+  if (!append) {
+    nodes.chatHistory.innerHTML = "";
+  } else {
+    const initialHero = document.querySelector("#initialHero");
+    if (initialHero) initialHero.remove();
+  }
   const clone = nodes.chatItemTemplate.content.cloneNode(true);
   const container = clone.querySelector('.chat-item');
   clone.querySelector('.user-query').textContent = query;
@@ -431,6 +533,14 @@ function createChatItem(query) {
       if (payload) populateDrawers(payload);
       showDrawer(btn.dataset.drawer);
     });
+  });
+
+  const progressToggle = container.querySelector('.progress-toggle');
+  const progressSteps = container.querySelector('.progress-steps');
+  progressToggle.addEventListener("click", () => {
+    const isHidden = progressSteps.classList.toggle("hidden");
+    progressToggle.textContent = isHidden ? "展开" : "收起";
+    container.querySelector(".thinking").classList.toggle("expanded", !isHidden);
   });
 
   setTimeout(() => {
@@ -446,6 +556,7 @@ function createChatItem(query) {
     thinking: container.querySelector('.thinking'),
     statusText: container.querySelector('.status-text'),
     progressSteps: container.querySelector('.progress-steps'),
+    progressToggle,
     summary: container.querySelector('.answer-text'),
     insights: container.querySelector('.insight-list'),
     feedbackBar: container.querySelector('.feedback-toolbar'),
@@ -459,17 +570,42 @@ function createChatItem(query) {
     resultCount: container.querySelector('.result-count'),
     latencyBadge: container.querySelector('.latency')
   };
+  chatObj.copyBtn.addEventListener("click", () => {
+    navigator.clipboard.writeText(chatObj.summary.innerText);
+    chatObj.copyText.textContent = "已复制";
+    chatObj.copyBtn.style.color = "#0071e3";
+    setTimeout(() => {
+      chatObj.copyText.textContent = "复制";
+      chatObj.copyBtn.style.color = "#1d1d1f";
+    }, 2000);
+  });
+  chatObj.upvoteBtn.addEventListener("click", () => {
+    chatObj.upvoteBtn.classList.toggle("active");
+    chatObj.downvoteBtn.classList.remove("active");
+  });
+  chatObj.downvoteBtn.addEventListener("click", () => {
+    chatObj.downvoteBtn.classList.toggle("active");
+    chatObj.upvoteBtn.classList.remove("active");
+  });
   container._payloadLink = chatObj;
   return chatObj;
 }
 
-async function runResearch() {
-  if (state.running) {
-    if (state.abortController) state.abortController.abort();
-    return;
-  }
+function isChatVisible(chat) {
+  return Boolean(chat?.container && document.body.contains(chat.container));
+}
 
+function setCurrentConversation(conversation) {
+  state.currentConversationId = conversation?.id || null;
+  state.currentConversationTitle = conversation?.title || "";
+  nodes.activeProjectName.textContent = conversation?.title
+    ? `当前：${conversation.title}`
+    : "新对话，发送后保存";
+}
+
+async function runResearch(options = {}) {
   const query = nodes.query.value.trim() || DEFAULT_QUERY;
+  const conversationId = options.conversationId || state.currentConversationId || null;
 
   if (!state.hasResult) {
     nodes.query.disabled = true;
@@ -493,20 +629,24 @@ async function runResearch() {
     }
   }
 
-  state.abortController = new AbortController();
+  const controller = new AbortController();
+  let taskId = null;
 
   const dock = nodes.dockContainer;
   const first = dock.getBoundingClientRect();
 
-  state.currentChat = createChatItem(query);
-  nodes.query.value = "";
+  const chat = createChatItem(query, { append: true });
+  let finalChat = chat;
+  state.currentChat = chat;
 
-  const params = new URLSearchParams({
-    q: query,
-    online: nodes.online.checked ? "true" : "false",
-    include_local: "true",
-    limit: "8",
-  });
+  const tempId = "pending_" + Date.now();
+  chat.container.dataset.taskId = tempId;
+  state.taskRuns.set(tempId, { controller, chat, task: null, conversationId: conversationId });
+  if (!state.currentConversationId) {
+    nodes.activeProjectName.textContent = "新对话，发送后保存";
+  }
+  chat.thinking.classList.remove("hidden");
+  nodes.query.value = "";
 
   setBusy(true);
 
@@ -527,16 +667,31 @@ async function runResearch() {
 
   const startTime = Date.now();
   let textBuffer = "";
+  let payload = null;
+  let task = null;
+  let cancelledByUser = false;
+  let streamError = null;
 
   try {
-    params.set("stream", "true");
-    const response = await fetch(`/api/research?${params}`, { signal: state.abortController.signal });
+    const response = await fetch("/api/tasks?stream=true", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      signal: controller.signal,
+      body: JSON.stringify({
+        query,
+        project_id: "default",
+        conversation_id: conversationId,
+        online: nodes.online.checked,
+        include_local: true,
+        limit: 8,
+        origin_task_id: options.originTaskId || null,
+      }),
+    });
     if (!response.ok) throw new Error(`HTTP ${response.status}`);
 
     const reader = response.body.getReader();
     const decoder = new TextDecoder("utf-8");
     let done = false;
-    let payload = null;
 
     while (!done) {
       const { value, done: readerDone } = await reader.read();
@@ -549,31 +704,82 @@ async function runResearch() {
             try {
               const event = JSON.parse(line.substring(6));
 
-              if (event.type === "status") {
-                const elapsed = Math.floor((Date.now() - startTime) / 1000);
-                if (state.currentChat) {
-                  state.currentChat.statusText.textContent = `深度研究进行中 (${elapsed}s)`;
-                  const li = document.createElement("li");
-                  li.style.animation = "answerBlockIn 0.3s cubic-bezier(0.2, 0.8, 0.2, 1) forwards";
-                  li.innerHTML = `<span style="color: var(--teal); margin-right: 6px;">✓</span> <span>${escapeHtml(event.message)}</span>`;
-                  state.currentChat.progressSteps.appendChild(li);
+              if (event.type === "task") {
+                task = event.task;
+                taskId = task?.id || null;
+	                state.currentTaskId = taskId;
+	                state.activeTaskId = taskId;
+	                chat.task = task;
+	                chat.container.dataset.taskId = taskId || "";
+	                if (task?.conversation_id && !state.currentConversationId) {
+	                  state.currentConversationId = task.conversation_id;
+	                  state.currentConversationTitle = query.length > 28 ? `${query.slice(0, 28)}...` : query;
+	                  nodes.activeProjectName.textContent = `当前：${state.currentConversationTitle}`;
+	                }
+	                if (taskId) {
+	                  state.runningTaskIds.add(taskId);
+	                  state.chatByTaskId.set(taskId, chat);
 
-                  if (state.autoFollowAnswer) {
-                    nodes.chatHistory.scrollTop = nodes.chatHistory.scrollHeight;
-                  }
-                }
-              } else if (event.type === "chunk") {
+                      const run = state.taskRuns.get(tempId);
+                      if (run) {
+                        state.taskRuns.delete(tempId);
+                        run.task = task;
+                        run.conversationId = task?.conversation_id || conversationId;
+                        state.taskRuns.set(taskId, run);
+                      } else {
+	                    state.taskRuns.set(taskId, { controller, chat, task, conversationId: task?.conversation_id || conversationId });
+                      }
+
+	                  refreshRunningUi();
+	                }
+	                loadTasks();
+	              } else if (event.type === "status") {
+	                const elapsed = Math.floor((Date.now() - startTime) / 1000);
+	                const targetChat = taskId ? (state.taskRuns.get(taskId)?.chat || chat) : chat;
+	                if (isChatVisible(targetChat)) {
+	                  targetChat.statusText.textContent = `${event.message} · ${elapsed}s`;
+	                  const li = document.createElement("li");
+	                  li.style.animation = "answerBlockIn 0.3s cubic-bezier(0.2, 0.8, 0.2, 1) forwards";
+	                  li.innerHTML = `<span class="step-mark">✓</span><span>${escapeHtml(event.message)}</span>`;
+	                  targetChat.progressSteps.appendChild(li);
+	                }
+	              } else if (event.type === "chunk") {
                 textBuffer += event.chunk;
                 const lastLine = textBuffer.split("\n").filter(l => l.trim().length > 0).pop() || "";
                 const displayLine = lastLine.replace(/[#*`>{}\[\]]/g, "").trim();
-                const shortDisplay = displayLine.length > 50 ? displayLine.substring(displayLine.length - 50) : displayLine;
-                if (shortDisplay && state.currentChat) {
-                  state.currentChat.summary.innerHTML = `<span style="color: #86868b; font-style: italic;">正在思考：${shortDisplay}</span>`;
-                }
+	                const shortDisplay = displayLine.length > 50 ? displayLine.substring(displayLine.length - 50) : displayLine;
+	                const targetChat = taskId ? (state.taskRuns.get(taskId)?.chat || chat) : chat;
+	                if (shortDisplay && isChatVisible(targetChat)) {
+	                  targetChat.statusText.textContent = `正在组织答案：${shortDisplay}`;
+	                }
               } else if (event.type === "complete") {
                 payload = event.result;
+                task = event.task || task;
+                if (task?.id) {
+                  finalChat = state.taskRuns.get(task.id)?.chat || chat;
+                  state.runningTaskIds.delete(task.id);
+                  state.taskRuns.delete(task.id);
+                  refreshRunningUi();
+                }
+              } else if (event.type === "cancelled") {
+                cancelledByUser = true;
+                task = event.task || task;
+                if (task?.id) {
+                  finalChat = state.taskRuns.get(task.id)?.chat || chat;
+                  state.runningTaskIds.delete(task.id);
+                  state.taskRuns.delete(task.id);
+                  refreshRunningUi();
+                }
+	                const targetChat = task?.id ? (state.taskRuns.get(task.id)?.chat || finalChat) : finalChat;
+	                if (isChatVisible(targetChat)) {
+	                  renderFormattedAnswer(event.message || "研究已终止。", targetChat);
+	                  targetChat.thinking.classList.add("hidden");
+	                }
               } else if (event.type === "error") {
-                throw new Error(event.message);
+                task = event.task || task;
+                streamError = new Error(event.message);
+                done = true;
+                try { await reader.cancel(); } catch {}
               }
             } catch (e) {
               // ignore parse errors for partial chunks
@@ -583,22 +789,304 @@ async function runResearch() {
       }
     }
 
-    if (payload) {
-      if (state.currentChat) state.currentChat.container._payload = payload;
-      renderResearch(payload);
-    }
+    if (streamError) throw streamError;
+	    if (payload) {
+	      const targetChat = finalChat;
+	      targetChat.container._payload = payload;
+	      if (isChatVisible(targetChat)) {
+	        renderResearch(payload, { task, chat: targetChat });
+	      }
+	    }
   } catch (error) {
-    if (error.name === 'AbortError') {
-      if (state.currentChat) state.currentChat.statusText.textContent = "研究已终止";
-    } else {
-      console.error(error);
-      if (state.currentChat) state.currentChat.statusText.textContent = "研究发生错误";
+	    if (error.name === 'AbortError') {
+	      const targetChat = finalChat;
+	      if (isChatVisible(targetChat)) {
+	        targetChat.statusText.textContent = cancelledByUser ? "研究已终止" : "研究已中断";
+	      }
+	    } else {
+	      console.error(error);
+	      const targetChat = finalChat;
+	      if (isChatVisible(targetChat)) {
+	        targetChat.statusText.textContent = "研究发生错误";
+	        renderFormattedAnswer(error.message || "研究发生错误", targetChat);
+	      }
     }
   } finally {
-    if (state.currentChat && state.currentChat.statusText.textContent !== "研究已终止" && state.currentChat.statusText.textContent !== "研究发生错误") {
-      state.currentChat.thinking.classList.add("hidden");
+    if (taskId) {
+      state.runningTaskIds.delete(taskId);
+      state.taskRuns.delete(taskId);
     }
+    state.taskRuns.delete(tempId);
+    const targetChat = finalChat;
+	    if (isChatVisible(targetChat) && targetChat.statusText.textContent !== "研究已终止" && targetChat.statusText.textContent !== "研究发生错误") {
+	      targetChat.thinking.classList.add("hidden");
+	    }
     setBusy(false);
+    if (state.currentTaskId === taskId) state.currentTaskId = null;
+    refreshRunningUi();
+    await loadTasks();
+  }
+}
+
+async function cancelTask(taskId) {
+  if (taskId && !taskId.startsWith("pending_")) {
+    try {
+      await fetch(`/api/tasks/${taskId}/cancel`, { method: "POST" });
+    } catch (error) {
+      console.error(error);
+    }
+  }
+  const run = state.taskRuns.get(taskId);
+  if (run?.controller) run.controller.abort();
+  state.runningTaskIds.delete(taskId);
+  state.taskRuns.delete(taskId);
+  const chat = run?.chat || state.chatByTaskId.get(taskId);
+  if (isChatVisible(chat)) {
+    renderFormattedAnswer("研究已取消。", chat);
+    chat.thinking.classList.add("hidden");
+    chat.feedbackBar.classList.add("hidden");
+    chat.followupContainer.classList.add("hidden");
+    setResultControlsVisible(false, chat);
+  }
+  refreshRunningUi();
+  await loadTasks();
+}
+
+async function cancelCurrentTask() {
+  if (state.activeTaskId) await cancelTask(state.activeTaskId);
+}
+
+function formatTime(value) {
+  if (!value) return "-";
+  try {
+    return new Date(value).toLocaleString("zh-CN", { hour12: false, month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit" });
+  } catch {
+    return value;
+  }
+}
+
+function statusText(status) {
+  return {
+    queued: "排队",
+    running: "运行中",
+    cancelled: "已取消",
+    failed: "失败",
+    completed: "完成",
+    empty: "未开始",
+  }[status] || status || "-";
+}
+
+async function loadTasks() {
+  try {
+    const params = new URLSearchParams({
+      archived: state.showArchived ? "true" : "false",
+    });
+    const response = await fetch(`/api/conversations?${params}`);
+    if (!response.ok) throw new Error(`HTTP ${response.status}`);
+    const payload = await response.json();
+    state.conversations = payload.conversations || [];
+    renderTasks();
+  } catch (error) {
+    console.error(error);
+  }
+}
+
+function renderTasks() {
+  nodes.taskList.innerHTML = "";
+  nodes.historyModeLabel.textContent = state.showArchived ? "已归档对话" : "最近对话";
+  nodes.archiveToggle.textContent = state.showArchived ? "返回" : "归档";
+  if (!state.conversations.length) {
+    nodes.taskList.innerHTML = `<div class="empty compact">${state.showArchived ? "没有归档对话" : "还没有对话历史"}</div>`;
+    return;
+  }
+  state.conversations.forEach((conversation) => {
+    const latest = conversation.latest_task || {};
+    const runningIds = conversation.running_task_ids || [];
+    const item = document.createElement("article");
+    item.className = `task-item status-${conversation.status}${state.currentConversationId === conversation.id ? " active" : ""}`;
+    item.onclick = () => restoreConversation(conversation.id);
+
+    const title = document.createElement("h3");
+    title.textContent = conversation.title || latest.query || "未命名对话";
+
+    const meta = document.createElement("div");
+    meta.className = "task-meta";
+    const countText = conversation.task_count ? `${conversation.task_count} 条研究` : "空对话";
+    meta.textContent = `${formatTime(conversation.updated_at)} · ${statusText(conversation.status)} · ${countText}`;
+
+    const main = document.createElement("div");
+    main.className = "task-main";
+    main.append(title, meta);
+
+    const actions = document.createElement("div");
+    actions.className = "task-actions";
+
+    if (runningIds.length) {
+      const stop = document.createElement("button");
+      stop.type = "button";
+      stop.textContent = "停止";
+      stop.className = "danger-action";
+      stop.onclick = async (event) => {
+        event.stopPropagation();
+        await Promise.all(runningIds.map(id => cancelTask(id)));
+      };
+      actions.appendChild(stop);
+    }
+
+    const rename = document.createElement("button");
+    rename.type = "button";
+    rename.textContent = "命名";
+    rename.onclick = async (event) => {
+      event.stopPropagation();
+      await renameConversation(conversation.id, conversation.title || latest.query || "");
+    };
+
+    const archive = document.createElement("button");
+    archive.type = "button";
+    archive.textContent = state.showArchived ? "取消归档" : "归档";
+    archive.onclick = async (event) => {
+      event.stopPropagation();
+      await archiveConversation(conversation.id, !state.showArchived);
+    };
+
+    const remove = document.createElement("button");
+    remove.type = "button";
+    remove.textContent = "删除";
+    remove.onclick = async (event) => {
+      event.stopPropagation();
+      await deleteConversation(conversation.id, runningIds);
+    };
+
+    actions.append(rename, archive, remove);
+    item.append(main, actions);
+    nodes.taskList.appendChild(item);
+  });
+}
+
+async function newConversation() {
+  if (state.showArchived) {
+    state.showArchived = false;
+  }
+  resetConversationView();
+  setCurrentConversation(null);
+  await loadTasks();
+  nodes.query.focus();
+}
+
+function normalizeTaskResult(task) {
+  const result = task.result || {};
+  if (result.answer || result.traces || result.metrics) return result;
+  const isCancelled = task.status === "cancelled";
+  const isRunning = task.status === "running" || task.status === "queued";
+  return {
+    query: task.query,
+    answer: isCancelled ? "研究已取消。" : isRunning ? "" : (task.error_message || `任务状态：${statusText(task.status)}`),
+    plan: { intent: "", subqueries: [], source_plan: [], required_evidence: [], llm_used: false },
+    citations: [],
+    findings: [],
+    risks: task.error_message ? [task.error_message] : [],
+    decision_brief: {},
+    trust_score: {},
+    knowledge_map: {},
+    next_questions: [],
+    frontier_patterns: [],
+    metrics: { task_status: task.status },
+    traces: [],
+  };
+}
+
+async function restoreConversation(conversationId) {
+  const response = await fetch(`/api/conversations/${conversationId}`);
+  if (!response.ok) return;
+  const payload = await response.json();
+  const conversation = payload.conversation;
+  const tasks = conversation.tasks || [];
+  window.clearInterval(state.typeTimer);
+  state.typeTimer = null;
+  resetConversationView(tasks.length ? "" : "这个对话还没有研究。");
+  setCurrentConversation(conversation);
+  state.chatByTaskId.clear();
+  if (!tasks.length) {
+    renderTasks();
+    return;
+  }
+  document.body.classList.add("has-result");
+  nodes.dockContainer.classList.add("docked");
+  state.hasResult = true;
+  state.hasResultBefore = true;
+  nodes.chatHistory.innerHTML = "";
+  tasks.forEach((task) => {
+    const chat = createChatItem(task.query, { append: true });
+    chat.task = task;
+    chat.container.dataset.taskId = task.id;
+    state.chatByTaskId.set(task.id, chat);
+    state.currentChat = chat;
+    state.activeTaskId = task.id;
+    const run = state.taskRuns.get(task.id);
+    if (run) {
+      run.chat = chat;
+      run.task = task;
+      state.taskRuns.set(task.id, run);
+    }
+    const isActive = task.status === "running" || task.status === "queued";
+    if (isActive) {
+      chat.statusText.textContent = task.status === "queued" ? "排队中" : "研究进行中";
+      chat.thinking.classList.remove("hidden");
+    } else {
+      const result = normalizeTaskResult(task);
+      renderResearch(result, { task, chat, animate: false });
+      if (task.status === "cancelled") {
+        chat.thinking.classList.add("hidden");
+      } else {
+        chat.thinking.classList.add("hidden");
+      }
+    }
+  });
+  renderTasks();
+  refreshRunningUi();
+  requestAnimationFrame(() => {
+    nodes.chatHistory.scrollTop = nodes.chatHistory.scrollHeight;
+  });
+}
+
+async function renameConversation(conversationId, currentTitle) {
+  const title = window.prompt("重命名对话", currentTitle || "");
+  if (!title || !title.trim()) return;
+  const response = await fetch(`/api/conversations/${conversationId}`, {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ title: title.trim() }),
+  });
+  if (response.ok) {
+    if (state.currentConversationId === conversationId) {
+      const payload = await response.json();
+      setCurrentConversation(payload.conversation);
+    }
+    await loadTasks();
+  }
+}
+
+async function deleteConversation(conversationId, runningIds = []) {
+  await Promise.all((runningIds || []).map(id => cancelTask(id)));
+  const response = await fetch(`/api/conversations/${conversationId}`, { method: "DELETE" });
+  if (response.ok) {
+    if (state.currentConversationId === conversationId) {
+      await newConversation();
+    } else {
+      await loadTasks();
+    }
+  }
+}
+
+async function archiveConversation(conversationId, archived) {
+  const response = await fetch(`/api/conversations/${conversationId}/archive`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ archived }),
+  });
+  if (response.ok) {
+    if (state.currentConversationId === conversationId && archived) await newConversation();
+    await loadTasks();
   }
 }
 
@@ -703,30 +1191,30 @@ function applyProviderDefaults() {
 }
 
 function showDrawer(name) {
-  const resultOnly = new Set(["evidence", "plan", "trace", "quality"]);
+  const resultOnly = new Set(["evidence", "trace", "quality"]);
   if (resultOnly.has(name) && !state.hasResult) return;
   const titles = {
     model: "模型连接",
     sources: "在线源配置",
     evidence: "证据来源",
-    plan: "研究计划",
     trace: "Agent Trace",
     quality: "质量状态",
   };
   nodes.drawerTitle.textContent = titles[name] || "详情";
-  [nodes.modelView, nodes.sourcesView, nodes.evidenceView, nodes.planView, nodes.traceView, nodes.qualityView].forEach((view) => {
-    view.classList.add("hidden");
+  [nodes.modelView, nodes.sourcesView, nodes.evidenceView, nodes.traceView, nodes.qualityView].forEach((view) => {
+    if (view) view.classList.add("hidden");
   });
   const target = {
     model: nodes.modelView,
     sources: nodes.sourcesView,
     evidence: nodes.evidenceView,
-    plan: nodes.planView,
     trace: nodes.traceView,
     quality: nodes.qualityView,
   }[name];
   if (target) target.classList.remove("hidden");
   nodes.drawerOverlay.classList.remove("hidden");
+  const drawerEl = nodes.drawerOverlay.querySelector('.drawer');
+  if (drawerEl) drawerEl.scrollTop = 0;
 }
 
 function hideDrawer() {
@@ -738,7 +1226,7 @@ async function loadHealth() {
     const response = await fetch("/api/health");
     const payload = await response.json();
     const stats = payload.stats || {};
-    nodes.docCount.textContent = `${stats.documents ?? "-"} docs · ${stats.vocabulary ?? "-"} terms`;
+    nodes.docCount.textContent = `本地资料 ${stats.documents ?? "-"} 篇`;
     renderModelState(payload.llm);
   } catch (error) {}
 }
@@ -765,6 +1253,13 @@ function restoreLocalSettings() {
 
 nodes.form.addEventListener("submit", (e) => {
   e.preventDefault();
+  const currentRunning = getCurrentConversationRunningIds();
+  if (currentRunning.length > 0) {
+    for (const id of currentRunning) {
+      cancelTask(id);
+    }
+    return;
+  }
   nodes.drawerOverlay.click();
   runResearch();
 });
@@ -777,6 +1272,21 @@ nodes.online.addEventListener("change", () => {
 nodes.provider.addEventListener("change", applyProviderDefaults);
 nodes.saveModel.addEventListener("click", saveModelConfig);
 nodes.saveSources.addEventListener("click", saveSourceConfig);
+nodes.historyToggle.addEventListener("click", () => nodes.historyPanel.classList.toggle("collapsed"));
+nodes.historyCollapse.addEventListener("click", () => nodes.historyPanel.classList.add("collapsed"));
+nodes.newConversation.addEventListener("click", newConversation);
+nodes.archiveToggle.addEventListener("click", async () => {
+  state.showArchived = !state.showArchived;
+  if (state.showArchived && state.currentConversationId) {
+    const active = state.conversations.find(conversation => conversation.id === state.currentConversationId);
+    if (!active?.archived) {
+      resetConversationView();
+      setCurrentConversation(null);
+    }
+  }
+  await loadTasks();
+});
+nodes.refreshHistory.addEventListener("click", loadTasks);
 nodes.drawerClose.addEventListener("click", hideDrawer);
 nodes.drawerOverlay.addEventListener("click", (event) => {
   if (event.target === nodes.drawerOverlay) hideDrawer();
@@ -793,3 +1303,4 @@ setResultControlsVisible(false);
 restoreLocalSettings();
 loadHealth();
 loadSources();
+loadTasks();

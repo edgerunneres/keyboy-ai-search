@@ -4,7 +4,7 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>KeyBoy 智能专业搜索引擎</title>
-    <link rel="stylesheet" href="/style.css?v=20260618-format2" />
+    <link rel="stylesheet" href="/style.css?v=20260622-conversations6" />
   </head>
   <body>
     <div class="scene-bg">
@@ -14,9 +14,36 @@
       <div class="signal-line signal-line-b"></div>
     </div>
 
+    <aside id="historyPanel" class="history-panel collapsed">
+      <div class="history-head">
+        <div>
+          <strong>对话历史</strong>
+          <span id="activeProjectName">未选择对话</span>
+        </div>
+        <button id="historyCollapse" type="button" class="close-btn" aria-label="收起历史">×</button>
+      </div>
+      <div class="conversation-create">
+        <button id="newConversationBtn" type="button">新建对话</button>
+        <button id="archiveToggleBtn" type="button">归档</button>
+      </div>
+      <div class="history-subhead">
+        <span id="historyModeLabel">最近对话</span>
+        <button id="refreshHistoryBtn" type="button">刷新</button>
+      </div>
+      <div id="taskList" class="task-list"></div>
+    </aside>
+
     <main class="stage">
       <header class="floating-top">
         <div class="brand">
+          <button id="historyToggle" type="button" class="history-toggle-btn" aria-label="展开历史" title="展开历史">
+            <svg width="16" height="22" viewBox="0 0 16 22" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <rect x="3" y="3" width="10" height="16" rx="2"></rect>
+              <path d="M7 7h2"></path>
+              <path d="M7 11h2"></path>
+              <path d="M7 15h2"></path>
+            </svg>
+          </button>
           <div class="brand-mark">
             <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
               <path d="M21 2l-2 2m-7.61 7.61a5.5 5.5 0 1 1-7.778 7.778 5.5 5.5 0 0 1 7.777-7.777zm0 0L15.5 7.5m0 0l3 3L22 7l-3-3m-3.5 3.5L19 4"></path>
@@ -29,14 +56,14 @@
         </div>
 
         <div class="top-actions">
+          <button type="button" class="ghost-btn" data-drawer="sources">在线源</button>
           <label class="toggle-switch">
             <input id="onlineToggle" type="checkbox" checked />
-            <span class="toggle-slider"></span>
             <span>在线资料</span>
+            <span class="toggle-slider"></span>
           </label>
-          <span id="docCount" class="pill">- docs</span>
+          <span id="docCount" class="pill">本地资料 - 篇</span>
           <span id="modelState" class="pill">本地 fallback</span>
-          <button type="button" class="ghost-btn" data-drawer="sources">在线源</button>
           <button type="button" class="ghost-btn" data-drawer="model">模型</button>
         </div>
       </header>
@@ -64,11 +91,12 @@
         </div>
         <div class="ai-bubble answer-stage">
           <div class="thinking hidden">
-            <div style="display: flex; align-items: center; gap: 10px; font-weight: 600; color: var(--blue);">
-              <span></span><span></span><span></span>
-              <p class="status-text" style="margin:0;">初始化研究流程...</p>
+            <div class="thinking-row">
+              <div class="thinking-dots" aria-hidden="true"><span></span><span></span><span></span></div>
+              <p class="status-text">初始化研究流程...</p>
+              <button type="button" class="progress-toggle">展开</button>
             </div>
-            <ul class="progress-steps" style="list-style: none; padding-left: 16px; margin: 12px 0 12px 6px; border-left: 2px solid rgba(0, 113, 227, 0.2); font-size: 14px; color: var(--muted); display: grid; gap: 8px;"></ul>
+            <ul class="progress-steps hidden"></ul>
           </div>
           <div class="answer-text"></div>
           <ul class="insight-list"></ul>
@@ -98,7 +126,6 @@
               <span>证据</span>
               <strong class="result-count">0</strong>
             </button>
-            <button type="button" class="result-btn drawer-btn" data-drawer="plan">计划</button>
             <button type="button" class="result-btn drawer-btn" data-drawer="trace">过程</button>
             <button type="button" class="result-btn drawer-btn" data-drawer="quality">质量</button>
             <span class="latency">- ms</span>
@@ -183,15 +210,13 @@
           <div id="results" class="evidence-list"></div>
         </section>
 
-        <section id="drawerPlan" class="drawer-view hidden">
-          <dl id="profileList"></dl>
-        </section>
-
         <section id="drawerTrace" class="drawer-view hidden">
+          <dl id="profileList"></dl>
           <div id="traceList" class="trace-list"></div>
         </section>
 
         <section id="drawerQuality" class="drawer-view hidden">
+          <div id="qualityBrief" class="quality-brief"></div>
           <dl id="qualityList"></dl>
           <div class="drawer-subhead">
             <span id="riskBadge">0 条风险</span>
@@ -201,6 +226,6 @@
       </aside>
     </div>
 
-    <script src="/app.js?v=20260618-format2"></script>
+    <script src="/app.js?v=20260622-conversations6"></script>
   </body>
 </html>

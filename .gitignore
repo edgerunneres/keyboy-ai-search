@@ -10,6 +10,12 @@ env/
 # Local QA render outputs generated from DOCX verification.
 docs/_rendered_keyboy_doc/
 
+# KeyBoy 1.1 local runtime state.
+data/*.db
+data/*.db-shm
+data/*.db-wal
+data/eval_runs/
+
 # V2 is a separate repo.
 keyboy_v2/
 

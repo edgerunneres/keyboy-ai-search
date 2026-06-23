@@ -57,6 +57,11 @@ DISPLAY_NAMES = {
     "duckduckgo": "DuckDuckGo",
 }
 
+# Local test defaults for this course-design checkout. OpenAlex works without an
+# API key, so the default key is intentionally blank; keep secrets in env/config.
+LOCAL_TEST_OPENALEX_API_KEY = ""
+LOCAL_TEST_SOURCE_EMAIL = "yup300737@gmail.com"
+
 
 class OnlineSourceClient:
     def __init__(self, timeout: float = 15.0, per_source_limit: int = 5) -> None:
@@ -65,9 +70,9 @@ class OnlineSourceClient:
         self.user_agent = "KeyBoyAgenticResearch/3.0 (course-design; polite online research)"
         self.disabled = os.getenv("KEYBOY_DISABLE_ONLINE", "0") == "1"
         self.semantic_scholar_api_key = os.getenv("SEMANTIC_SCHOLAR_API_KEY", "")
-        self.openalex_api_key = os.getenv("OPENALEX_API_KEY", "")
-        self.openalex_mailto = os.getenv("OPENALEX_MAILTO") or "yup300737@gmail.com"
-        self.crossref_mailto = os.getenv("CROSSREF_MAILTO") or "yup300737@gmail.com"
+        self.openalex_api_key = os.getenv("OPENALEX_API_KEY") or LOCAL_TEST_OPENALEX_API_KEY
+        self.openalex_mailto = os.getenv("OPENALEX_MAILTO") or LOCAL_TEST_SOURCE_EMAIL
+        self.crossref_mailto = os.getenv("CROSSREF_MAILTO") or LOCAL_TEST_SOURCE_EMAIL
 
     def configure(
         self,
@@ -82,11 +87,11 @@ class OnlineSourceClient:
         if semantic_scholar_api_key is not None:
             self.semantic_scholar_api_key = semantic_scholar_api_key.strip()
         if openalex_api_key is not None:
-            self.openalex_api_key = openalex_api_key.strip() or os.getenv("OPENALEX_API_KEY", "")
+            self.openalex_api_key = openalex_api_key.strip() or os.getenv("OPENALEX_API_KEY") or LOCAL_TEST_OPENALEX_API_KEY
         if openalex_mailto is not None:
-            self.openalex_mailto = openalex_mailto.strip()
+            self.openalex_mailto = openalex_mailto.strip() or LOCAL_TEST_SOURCE_EMAIL
         if crossref_mailto is not None:
-            self.crossref_mailto = crossref_mailto.strip()
+            self.crossref_mailto = crossref_mailto.strip() or LOCAL_TEST_SOURCE_EMAIL
         if timeout is not None:
             self.timeout = max(3.0, float(timeout))
         if per_source_limit is not None:

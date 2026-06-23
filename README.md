@@ -1,26 +1,39 @@
-# KeyBoy 智能专业搜索引擎
+# KeyBoy AI Research 1.1
 
-> **🌟 注意**：这是软件工程课程设计项目的**第一版**（专注智能搜索）。升级后的**第二版**（完整智能课程复习系统）请移步至 [keyboy-v2](https://github.com/edgerunneres/keyboy-v2)。
+> 注意：这是基于 `keyboy-ai-search` 第一版复制出来的 1.1 升级版，不是 `keyboy-v2`。原 1.0 目录保持不变。
 
-KeyBoy 是一个面向软件工程课程设计验收的 LLM 多智能体在线研究系统。它从原计划书中的“定向爬取 + TF-IDF + 简单总结”升级为“Agentic RAG / Deep Research 工作流 + 在线论文/开放学术源获取 + LLM 规划与证据合成 + 可解释检索 + 批判校验”的完整可运行系统。
+KeyBoy 1.1 的定位是“轻量 Deep Research 工作台 + 项目文件夹 + 独立研究历史 + 可验证证据链”。主流程仍然是输入问题后直接研究，但每次研究都会保存为一条独立任务，可恢复、删除、重跑、移动项目，并支持运行中取消。
 
 ## 快速运行
 
-```powershell
-pip install -r requirements.txt
+```bash
+/Users/yupeilin/.cache/codex-runtimes/codex-primary-runtime/dependencies/python/bin/python3 -m pip install -r requirements.txt
 ```
 
-```powershell
-python -m keyboy.app --host 127.0.0.1 --port 8787
+```bash
+/Users/yupeilin/.cache/codex-runtimes/codex-primary-runtime/dependencies/python/bin/python3 -m uvicorn keyboy.app:app --host 127.0.0.1 --port 8789
 ```
 
 浏览器打开：
 
 ```text
-http://127.0.0.1:8787
+http://127.0.0.1:8789
 ```
 
 后端使用 FastAPI + Uvicorn 提供 API、静态页面和流式研究进度；核心检索、Agent 编排、在线源适配仍保留轻量 Python 实现。
+
+## 1.1 新增能力
+
+- SQLite 项目文件夹和研究任务历史。
+- 可收起历史栏，支持恢复、删除、重跑、移动项目。
+- 每次研究都是独立任务，同一问题重复研究不会自动合并。
+- 任务状态：`queued`、`running`、`cancelled`、`failed`、`completed`。
+- 运行中取消：后端在阶段之间检查取消状态，并保留已产生 trace。
+- 证据抽屉增强：支持结论、原文片段、支持程度、读取状态、风险提示。
+- 来源正文读取：网页、arXiv/DOI 页面、GitHub README、技术博客和基础 PDF 读取。
+- 检索质量升级：URL/DOI/title 去重、chunk 级证据、来源多样性和轻量 rerank 指标。
+- 后端生成追问，点击追问会创建新的独立研究任务。
+- 30 条轻量评测集和指标定义，见 `data/eval_tasks.json` 与 `tools/run_eval_suite.py`。
 
 ## 启用真实大模型
 
@@ -30,7 +43,7 @@ http://127.0.0.1:8787
 $env:KEYBOY_LLM_API_KEY="你的 API Key"
 $env:KEYBOY_LLM_BASE_URL="https://api.openai.com/v1"
 $env:KEYBOY_LLM_MODEL="你的模型名"
-python -m keyboy.app --host 127.0.0.1 --port 8787
+python -m uvicorn keyboy.app:app --host 127.0.0.1 --port 8789
 ```
 
 ### 使用阿里云百炼 / 通义千问
@@ -42,7 +55,7 @@ python -m keyboy.app --host 127.0.0.1 --port 8787
 
 ```powershell
 $env:DASHSCOPE_API_KEY="你的百炼 API Key"
-python -m keyboy.app --host 127.0.0.1 --port 8787
+python -m uvicorn keyboy.app:app --host 127.0.0.1 --port 8789
 ```
 
 如需手动指定模型：
@@ -50,7 +63,7 @@ python -m keyboy.app --host 127.0.0.1 --port 8787
 ```powershell
 $env:DASHSCOPE_API_KEY="你的百炼 API Key"
 $env:KEYBOY_LLM_MODEL="qwen3.7-max"
-python -m keyboy.app --host 127.0.0.1 --port 8787
+python -m uvicorn keyboy.app:app --host 127.0.0.1 --port 8789
 ```
 
 如果你更看重稳定生产能力和成本控制，也可以把 `KEYBOY_LLM_MODEL` 改为 `qwen3.6-plus`；如果需要固定复现实验结果，可以使用对应的快照版本，例如 `qwen3.7-max-2026-05-20`。
@@ -75,9 +88,12 @@ powershell -ExecutionPolicy Bypass -File tools/start_bailian.ps1
 
 ## 常用命令
 
-```powershell
+```bash
 # 运行测试
-python -m unittest discover -s tests
+/Users/yupeilin/.cache/codex-runtimes/codex-primary-runtime/dependencies/python/bin/python3 -m unittest discover -s tests
+
+# 运行前 5 条离线评测
+/Users/yupeilin/.cache/codex-runtimes/codex-primary-runtime/dependencies/python/bin/python3 tools/run_eval_suite.py --max-tasks 5
 
 # 命令行检索
 python -m keyboy.cli search "混合检索 RRF 为什么比 TF-IDF 更强"

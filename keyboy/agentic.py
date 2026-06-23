@@ -12,6 +12,7 @@ from .index import HybridSearchIndex
 from .llm import LLMProvider
 from .models import AgentTrace, SearchDocument
 from .online_sources import OnlineSourceClient
+from .source_reader import SourceReadSummary, SourceReader, source_identity
 from .storage import load_documents
 from .summarizer import build_summary
 from .text import DOMAIN_TERMS, normalize_text, split_sentences, tokenize
@@ -93,6 +94,13 @@ class ResearchResult:
             "metrics": self.metrics,
             "traces": [trace.to_dict() for trace in self.traces],
         }
+
+
+class ResearchCancelled(Exception):
+    def __init__(self, message: str, *, traces: list[AgentTrace] | None = None, metrics: dict[str, Any] | None = None) -> None:
+        super().__init__(message)
+        self.traces = traces or []
+        self.metrics = metrics or {}
 
 
 class ResearchPlannerAgent:
@@ -190,7 +198,7 @@ class OnlineDiscoveryAgent:
             warnings.extend(source_warnings)
         unique: dict[str, SearchDocument] = {}
         for doc in docs:
-            unique.setdefault(doc.id, doc)
+            unique.setdefault(source_identity(doc), doc)
         return type(
             "AgentResult",
             (),
@@ -232,6 +240,26 @@ class OnlineDiscoveryAgent:
         return warning
 
 
+class SourceReadAgent:
+    def __init__(self, reader: SourceReader | None = None) -> None:
+        self.reader = reader or SourceReader()
+
+    @traced("SourceReadAgent")
+    def read(self, documents: list[SearchDocument], *, online: bool = True, on_progress: Any = None, should_cancel: Any = None) -> Any:
+        if not online or not documents:
+            return type(
+                "AgentResult",
+                (),
+                {"payload": SourceReadSummary(), "trace_message": "跳过来源正文读取"},
+            )()
+        summary = self.reader.read_documents(documents, on_progress=on_progress, should_cancel=should_cancel)
+        return type(
+            "AgentResult",
+            (),
+            {"payload": summary, "trace_message": f"读取 {summary.readable}/{summary.attempted} 个来源正文"},
+        )()
+
+
 class EvidenceRankerAgent:
     def __init__(self, llm: LLMProvider) -> None:
         self.llm = llm
@@ -253,6 +281,8 @@ class SynthesisAgent:
         for idx, hit in enumerate(hits[:8], start=1):
             sentences = split_sentences(hit.document.content)
             evidence = sentences[0] if sentences else hit.document.content[:240]
+            original_excerpt = hit.snippet or evidence
+            risk_flags = self._citation_risks(hit.document)
             citations.append(
                 {
                     "id": idx,
@@ -262,6 +292,11 @@ class SynthesisAgent:
                     "published_at": hit.document.published_at,
                     "score": round(hit.score, 2),
                     "evidence": evidence,
+                    "supporting_claim": self._supporting_claim(query, evidence),
+                    "original_excerpt": original_excerpt,
+                    "support_level": self._support_level(hit.score),
+                    "risk_flags": risk_flags,
+                    "read_status": self._read_status(hit.document),
                 }
             )
             context_blocks.append(f"[{idx}] {hit.document.title}\n{evidence}\nURL: {hit.document.url}")
@@ -310,6 +345,47 @@ class SynthesisAgent:
             "llm_error": llm_result.text if not llm_result.used_remote_model and self.llm.enabled else None
         }
         return type("AgentResult", (), {"payload": payload, "trace_message": "完成证据合成"})()
+
+    @staticmethod
+    def _supporting_claim(query: str, evidence: str) -> str:
+        sentence = split_sentences(evidence)
+        if sentence:
+            return f"支撑对“{query[:32]}”的关键判断：{sentence[0][:120]}"
+        return f"支撑对“{query[:32]}”的资料判断。"
+
+    @staticmethod
+    def _support_level(score: float) -> str:
+        if score >= 70:
+            return "强"
+        if score >= 40:
+            return "中"
+        return "弱"
+
+    @staticmethod
+    def _read_status(document: SearchDocument) -> str:
+        joined = " ".join(document.tags)
+        if "body-read" in joined or "source-read" in joined:
+            return "已读正文"
+        return "仅摘要"
+
+    @staticmethod
+    def _citation_risks(document: SearchDocument) -> list[str]:
+        risks: list[str] = []
+        prefix = f"《{document.title}》" if document.title else f"链接 {document.url}"
+        joined = " ".join(document.tags)
+        if "body-read" not in joined and "source-read" not in joined:
+            risks.append(f"{prefix} 未能提取正文，仅依靠摘要可能导致信息不全")
+        if "read:pdf" in joined:
+            risks.append(f"{prefix} 为 PDF 文件，复杂排版或图表内容可能提取丢失")
+        if not document.url.startswith(("http://", "https://", "doi:")):
+            risks.append(f"{prefix} 格式特殊，可能无法直接访问验证")
+        try:
+            year = int(str(document.published_at)[:4])
+            if year and year < 2021:
+                risks.append(f"{prefix} 发表较早（{year}年），注意时效性")
+        except ValueError:
+            pass
+        return risks
 
 
 class CriticAgent:
@@ -586,6 +662,7 @@ class AgenticKeyBoySystem:
     index_agent: IndexAgent = field(default_factory=IndexAgent)
     planner_agent: ResearchPlannerAgent = field(init=False)
     discovery_agent: OnlineDiscoveryAgent = field(default_factory=OnlineDiscoveryAgent)
+    source_read_agent: SourceReadAgent = field(default_factory=SourceReadAgent)
     evaluator_agent: EvaluatorAgent = field(init=False)
     ranker_agent: EvidenceRankerAgent = field(init=False)
     synthesis_agent: SynthesisAgent = field(init=False)
@@ -598,9 +675,26 @@ class AgenticKeyBoySystem:
         self.synthesis_agent = SynthesisAgent(self.llm)
         self.evaluator_agent = EvaluatorAgent(self.llm)
 
-    def research(self, query: str, *, online: bool = True, include_local: bool = True, limit: int = 10, on_event: Any = None) -> ResearchResult:
+    def research(
+        self,
+        query: str,
+        *,
+        online: bool = True,
+        include_local: bool = True,
+        limit: int = 10,
+        on_event: Any = None,
+        should_cancel: Any = None,
+        on_trace: Any = None,
+    ) -> ResearchResult:
         traces: list[AgentTrace] = []
         started = time.perf_counter()
+        all_warnings: list[str] = []
+        online_document_count = 0
+        source_read_reports: list[dict[str, Any]] = []
+        cleaned: list[SearchDocument] = []
+        hits = []
+        ranked: dict[str, Any] = {"hits": [], "profile": {}}
+        index = HybridSearchIndex()
 
         self.llm_stream_buffer = ""
         def handle_chunk(chunk: str):
@@ -614,54 +708,91 @@ class AgenticKeyBoySystem:
             if on_event:
                 on_event({"type": "status", "message": msg})
 
+        def append_trace(trace: AgentTrace) -> None:
+            traces.append(trace)
+            if trace.status == "error":
+                all_warnings.append(f"{trace.name} 失败：{trace.message}")
+            if on_trace:
+                on_trace([item.to_dict() for item in traces])
+
+        def check_cancel() -> None:
+            if should_cancel and should_cancel():
+                metrics = {
+                    "latency_ms": round((time.perf_counter() - started) * 1000, 2),
+                    "online_documents": online_document_count,
+                    "indexed_documents": len(cleaned),
+                    "result_count": len(hits),
+                    "cancelled": True,
+                }
+                raise ResearchCancelled("研究已取消，已保留已完成阶段日志。", traces=traces, metrics=metrics)
+
+        check_cancel()
         set_status("正在规划研究方案...")
         plan_result, trace = self.planner_agent.plan(query, on_chunk=handle_chunk)
-        traces.append(trace)
+        append_trace(trace)
+        check_cancel()
         plan: ResearchPlan = plan_result.payload if plan_result else self.planner_agent._fallback_plan(query)
 
         all_documents = []
         if include_local:
             all_documents.extend(load_documents())
 
-        all_warnings = []
-        online_document_count = 0
         max_iterations = 2
         iteration = 0
-        hits = []
-        index = HybridSearchIndex()
 
         while iteration < max_iterations:
             iteration += 1
+            check_cancel()
             set_status(f"[第 {iteration} 轮迭代] 正在发现在线资料...")
             discovery_result, trace = self.discovery_agent.discover(plan, online=online, on_progress=set_status)
-            traces.append(trace)
-            online_docs, source_warnings = discovery_result.payload
+            append_trace(trace)
+            check_cancel()
+            online_docs, source_warnings = discovery_result.payload if discovery_result else ([], [trace.message])
 
             all_documents.extend(online_docs)
             online_document_count += len(online_docs)
             all_warnings.extend(source_warnings)
 
+            if online_docs:
+                set_status(f"[第 {iteration} 轮迭代] 正在打开来源并读取正文...")
+            source_read_result, trace = self.source_read_agent.read(
+                online_docs,
+                online=online,
+                on_progress=set_status,
+                should_cancel=should_cancel,
+            )
+            append_trace(trace)
+            check_cancel()
+            source_read_summary = source_read_result.payload if source_read_result else SourceReadSummary()
+            source_read_reports.extend(source_read_summary.reports)
+            all_documents.extend(source_read_summary.documents)
+            all_warnings.extend(source_read_summary.warnings[:8])
+
             set_status(f"[第 {iteration} 轮迭代] 正在清洗与整理文档...")
             clean_result, trace = self.clean_agent.clean(all_documents)
-            traces.append(trace)
+            append_trace(trace)
+            check_cancel()
             cleaned = clean_result.payload if clean_result else []
 
             set_status(f"[第 {iteration} 轮迭代] 正在构建知识索引...")
             index_result, trace = self.index_agent.build(cleaned)
-            traces.append(trace)
+            append_trace(trace)
+            check_cancel()
             index = index_result.payload if index_result else HybridSearchIndex()
 
             set_status(f"[第 {iteration} 轮迭代] 正在检索相关证据...")
             rank_result, trace = self.ranker_agent.rank(index, query, limit=limit)
-            traces.append(trace)
+            append_trace(trace)
+            check_cancel()
             ranked = rank_result.payload if rank_result else {"hits": [], "profile": {}}
             hits = ranked["hits"]
 
             if iteration < max_iterations:
                 set_status(f"[第 {iteration} 轮迭代] 评估证据是否充足...")
                 eval_result, trace = self.evaluator_agent.evaluate(query, hits)
-                traces.append(trace)
-                eval_payload = eval_result.payload
+                append_trace(trace)
+                check_cancel()
+                eval_payload = eval_result.payload if eval_result else {"sufficient": True, "new_subqueries": []}
 
                 if eval_payload.get("sufficient"):
                     set_status("证据充足，准备合成最终答案。")
@@ -673,26 +804,38 @@ class AgenticKeyBoySystem:
                     set_status(f"发现知识盲区，生成补充查询: {', '.join(new_subs)}")
                     plan.subqueries = new_subs
 
+        check_cancel()
         set_status("正在合成研究答案 (调用 LLM 需时较长)...")
         synth_result, trace = self.synthesis_agent.synthesize(query, hits, on_chunk=handle_chunk)
-        traces.append(trace)
+        append_trace(trace)
+        check_cancel()
         synth = synth_result.payload if synth_result else {"answer": "", "citations": [], "findings": [], "llm_used": False, "model": ""}
 
         set_status("正在进行批判与风险校验 (调用 LLM 需时较长)...")
         critique_result, trace = self.critic_agent.critique(synth)
-        traces.append(trace)
-        risks = list(all_warnings[:4]) + (critique_result.payload if critique_result else [])
+        append_trace(trace)
+        check_cancel()
+        risks = list(dict.fromkeys(all_warnings[:10] + (critique_result.payload if critique_result else [])))
 
         set_status("正在生成最终研究简报 (调用 LLM 需时较长)...")
         strategy_result, trace = self.strategy_agent.advise(query, plan, hits, synth, risks)
-        traces.append(trace)
-        strategy = strategy_result.payload if strategy_result else {
-            "decision_brief": {},
-            "trust_score": {},
-            "knowledge_map": {},
-            "next_questions": [],
-            "frontier_patterns": FRONTIER_PATTERNS,
-        }
+        append_trace(trace)
+        if trace.status == "error":
+            risks = list(dict.fromkeys(risks + [f"{trace.name} 失败：{trace.message}"]))
+        check_cancel()
+        strategy = strategy_result.payload if strategy_result else self._fallback_strategy(query, plan, hits, synth, risks)
+
+        failed_agents = [
+            {"name": trace.name, "message": trace.message}
+            for trace in traces
+            if trace.status == "error"
+        ]
+        body_read_count = sum(1 for item in source_read_reports if item.get("status") in {"ok", "partial"})
+        source_diversity = len({citation.get("source") for citation in synth.get("citations", []) if citation.get("source")})
+        supportable_citations = [
+            citation for citation in synth.get("citations", [])
+            if citation.get("support_level") in {"强", "中"} and citation.get("read_status") == "已读正文"
+        ]
 
         latency_ms = (time.perf_counter() - started) * 1000
         metrics = {
@@ -704,6 +847,16 @@ class AgenticKeyBoySystem:
             "llm_model": synth.get("model") or "deterministic-fallback",
             "query_profile": ranked.get("profile", {}),
             "index": index.stats(),
+            "source_read_attempted": len(source_read_reports),
+            "source_read_success": body_read_count,
+            "source_read_reports": [
+                {key: item.get(key) for key in ("url", "title", "source", "source_type", "status", "length", "risks")}
+                for item in source_read_reports
+            ],
+            "source_diversity": source_diversity,
+            "citation_support_rate": round(len(supportable_citations) / max(1, len(synth.get("citations", []))), 3),
+            "failed_agents": failed_agents,
+            "model_cost": "未配置远程模型" if not synth.get("llm_used") else "由模型平台计费统计为准",
         }
         return ResearchResult(
             query=query,
@@ -720,3 +873,21 @@ class AgenticKeyBoySystem:
             metrics=metrics,
             traces=traces,
         )
+
+    @staticmethod
+    def _fallback_strategy(query: str, plan: ResearchPlan, hits, synth: dict[str, Any], risks: list[str]) -> dict[str, Any]:
+        citations = synth.get("citations", [])
+        trust_score = StrategyAgent._trust_score(citations, risks, bool(synth.get("llm_used")))
+        knowledge_map = StrategyAgent._knowledge_map(query, hits)
+        return {
+            "decision_brief": {
+                "user_need": StrategyAgent._infer_user_need(query),
+                "recommended_path": StrategyAgent._recommended_path(query, plan, citations, trust_score),
+                "why_keyboy": StrategyAgent._why_keyboy(trust_score, citations),
+                "tradeoffs": StrategyAgent._tradeoffs(query, citations),
+            },
+            "trust_score": trust_score,
+            "knowledge_map": knowledge_map,
+            "next_questions": StrategyAgent._next_questions(query, knowledge_map),
+            "frontier_patterns": FRONTIER_PATTERNS,
+        }
