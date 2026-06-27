@@ -150,7 +150,7 @@ class LLMProvider:
                     return LLMResult(text=text, model=self.model, provider=self.base_url, used_remote_model=True, raw=raw)
         except Exception as exc:
             return LLMResult(
-                text=f"LLM call failed: {exc}",
+                text="大模型调用失败，请检查密钥、模型名、服务地址或网络配置。",
                 model=self.model,
                 provider=self.base_url,
                 used_remote_model=False,

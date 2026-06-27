@@ -5,13 +5,15 @@ from unittest.mock import patch
 from fastapi.testclient import TestClient
 
 import keyboy.app as app_module
-from keyboy.agentic import AgenticKeyBoySystem, ResearchPlannerAgent
+from keyboy.agentic import AgenticKeyBoySystem, EvaluatorAgent, ResearchPlannerAgent
 from keyboy.app import app
 from keyboy.agents import KeyBoySystem
 from keyboy.evaluator import evaluate
 from keyboy.eval_suite import load_eval_tasks
 from keyboy.llm import LLMProvider
+from keyboy.models import SearchDocument
 from keyboy.online_sources import OnlineSourceClient
+from keyboy.source_reader import SourceReader
 from keyboy.storage import load_eval_queries
 from keyboy.task_store import TaskStore
 
@@ -109,11 +111,96 @@ class KeyBoyTest(unittest.TestCase):
         sources = ResearchPlannerAgent._normalize_source_plan(raw_sources, fallback)
         self.assertEqual(sources, fallback)
 
+    def test_fallback_subqueries_are_readable_for_chinese_demo(self):
+        query = "Agentic RAG GraphRAG LightRAG Self-RAG 最新研究怎么整合到课程项目"
+        plan = ResearchPlannerAgent._fallback_plan(query)
+        joined = " ".join(plan.subqueries)
+        self.assertNotIn(query, plan.subqueries)
+        self.assertIn("最新论文与技术综述", joined)
+        self.assertIn("课程项目落地方案与评测指标", joined)
+        self.assertNotIn("怎么整合到课程项目", joined)
+        self.assertNotIn("最 新", joined)
+        self.assertNotIn("survey benchmark architecture", joined)
+
+    def test_normalized_subqueries_remove_raw_query_repetition(self):
+        query = "Agentic RAG GraphRAG LightRAG Self-RAG 最新研究怎么整合到课程项目"
+        subqueries = ResearchPlannerAgent._normalize_subqueries(
+            [query, f"{query}：最新论文与技术综述", f"{query}：课程项目落地方案与评测指标"],
+            [],
+            query,
+        )
+        self.assertNotIn(query, subqueries)
+        self.assertIn("Agentic RAG GraphRAG LightRAG Self-RAG 最新论文与技术综述", subqueries)
+        self.assertIn("Agentic RAG GraphRAG LightRAG Self-RAG 课程项目落地方案与评测指标", subqueries)
+
+    def test_evaluator_followup_query_stays_chinese_and_not_raw_question(self):
+        query = "Agentic RAG GraphRAG LightRAG Self-RAG 最新研究怎么整合到课程项目"
+        result, trace = EvaluatorAgent(LLMProvider()).evaluate(query, [])
+        self.assertEqual(trace.status, "ok")
+        payload = result.payload
+        subqueries = payload["new_subqueries"]
+        self.assertEqual(subqueries, ["Agentic RAG GraphRAG LightRAG Self-RAG 补充综述与对比证据"])
+        self.assertNotIn("supplementary", " ".join(subqueries).lower())
+        self.assertNotIn("怎么整合到课程项目", " ".join(subqueries))
+
     def test_online_source_default_mailto(self):
         with patch.dict("os.environ", {"OPENALEX_MAILTO": "", "CROSSREF_MAILTO": ""}, clear=False):
             client = OnlineSourceClient()
             self.assertEqual(client.openalex_mailto, "yup300737@gmail.com")
             self.assertEqual(client.crossref_mailto, "yup300737@gmail.com")
+
+    def test_local_document_upload_adds_text_and_skips_unsupported_files(self):
+        existing = [
+            SearchDocument(
+                title="已有资料",
+                content="这是一篇已经存在的本地资料，用于验证上传接口不会污染真实语料库。" * 3,
+                url="local://existing",
+                source="KeyBoy Research",
+                published_at="2026-01-01",
+            )
+        ]
+        text = "这是一篇老师演示时上传的本地 Markdown 资料，内容会被追加到本地语料库，并参与后续研究检索。" * 3
+        with (
+            patch.object(app_module, "load_documents", return_value=existing.copy()),
+            patch.object(app_module, "save_documents") as save_documents_mock,
+            patch.object(app_module.SYSTEM, "bootstrap", return_value=[]),
+        ):
+            client = TestClient(app)
+            response = client.post(
+                "/api/local-documents",
+                files=[
+                    ("files", ("demo-notes.md", text.encode("utf-8"), "text/markdown")),
+                    ("files", ("paper.pdf", b"%PDF-1.4", "application/pdf")),
+                ],
+            )
+
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+        self.assertEqual(payload["added"], 1)
+        self.assertEqual(payload["skipped"][0]["file"], "paper.pdf")
+        self.assertIn("PDF/Word 暂未解析", payload["skipped"][0]["reason"])
+        saved_documents = save_documents_mock.call_args.args[0]
+        self.assertEqual(len(saved_documents), 2)
+        self.assertEqual(saved_documents[-1].source, "用户上传")
+        self.assertEqual(saved_documents[-1].category, "用户资料")
+
+    def test_source_reader_failure_message_stays_user_friendly(self):
+        reader = SourceReader()
+        doc = SearchDocument(
+            title="异常来源",
+            content="",
+            url="https://example.com/broken",
+            source="测试源",
+            published_at="2026-01-01",
+        )
+        raw_error = "SourceReader._failed_report() takes 3 positional arguments but 4 were given"
+        with patch.object(reader, "_dispatch_read", side_effect=TypeError(raw_error)):
+            report = reader._read_one(doc, doc.url)
+
+        self.assertEqual(report["status"], "failed")
+        self.assertIn("来源读取失败，已跳过该来源继续研究", report["risks"][0])
+        self.assertNotIn("takes 3 positional", report["risks"][0])
+        self.assertEqual(report["metadata"]["error_type"], "TypeError")
 
     def test_task_store_projects_move_and_cancel(self):
         with tempfile.TemporaryDirectory() as tmpdir:

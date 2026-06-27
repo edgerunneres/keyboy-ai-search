@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import time
 from collections import Counter
 from dataclasses import dataclass, field
@@ -124,12 +125,51 @@ class ResearchPlannerAgent:
         parsed, llm_result = self.llm.chat_json(messages, fallback=fallback.__dict__, on_chunk=on_chunk)
         plan = ResearchPlan(
             intent=str(parsed.get("intent") or fallback.intent),
-            subqueries=[str(x) for x in parsed.get("subqueries", fallback.subqueries)][:6],
+            subqueries=self._normalize_subqueries(parsed.get("subqueries", fallback.subqueries), fallback.subqueries, query),
             source_plan=self._normalize_source_plan(parsed.get("source_plan", fallback.source_plan), fallback.source_plan),
             required_evidence=[str(x) for x in parsed.get("required_evidence", fallback.required_evidence)][:6],
             llm_used=llm_result.used_remote_model,
         )
-        return type("AgentResult", (), {"payload": plan, "trace_message": f"规划 {len(plan.subqueries)} 个子查询"})()
+        return type("AgentResult", (), {"payload": plan, "trace_message": f"规划 {len(plan.subqueries)} 个检索方向"})()
+
+    @staticmethod
+    def _normalize_subqueries(raw_subqueries: Any, fallback: list[str], query: str = "") -> list[str]:
+        if not isinstance(raw_subqueries, list):
+            raw_subqueries = [raw_subqueries]
+        cleaned: list[str] = []
+        seen: set[str] = set()
+        clean_query = normalize_text(query)
+        query_key = ResearchPlannerAgent._subquery_key(clean_query)
+        for item in raw_subqueries:
+            text = ResearchPlannerAgent._clean_subquery_text(str(item or ""), clean_query)
+            if len(text) < 4:
+                continue
+            key = ResearchPlannerAgent._subquery_key(text)
+            if key == query_key:
+                continue
+            if key in seen:
+                continue
+            cleaned.append(text)
+            seen.add(key)
+        if cleaned:
+            return cleaned[:6]
+        if fallback:
+            return ResearchPlannerAgent._normalize_subqueries(fallback, [], query)[:6]
+        return []
+
+    @staticmethod
+    def _clean_subquery_text(value: str, query: str = "") -> str:
+        text = normalize_text(value).strip(" -_\"'“”")
+        text = re.sub(r"(?<=[\u4e00-\u9fff])\s+(?=[\u4e00-\u9fff])", "", text)
+        if query and text.startswith(query):
+            suffix = text[len(query):].lstrip("：: -_，,。；;")
+            text = f"{ResearchPlannerAgent._query_topic(query)}{suffix}".strip() if suffix else ""
+        return text
+
+    @staticmethod
+    def _subquery_key(value: str) -> str:
+        text = normalize_text(value).lower()
+        return re.sub(r"[\s：:，,。；;！？?\"'“”\-_/]+", "", text)
 
     @staticmethod
     def _normalize_source_plan(raw_sources: Any, fallback: list[str]) -> list[str]:
@@ -156,12 +196,12 @@ class ResearchPlannerAgent:
 
     @staticmethod
     def _fallback_plan(query: str) -> ResearchPlan:
-        terms = " ".join(tokenize(query)[:8]) or query
+        topic = ResearchPlannerAgent._query_topic(query)
         subqueries = [
-            query,
-            f"{query} survey benchmark architecture",
-            f"{terms} agentic RAG multi-agent",
-            f"{terms} GraphRAG LightRAG Self-RAG",
+            f"{topic}最新论文与技术综述",
+            f"{topic}架构差异与适用场景",
+            f"{topic}开源项目与系统实现",
+            "课程项目落地方案与评测指标",
         ]
         return ResearchPlan(
             intent="在线研究与证据合成",
@@ -170,6 +210,18 @@ class ResearchPlannerAgent:
             required_evidence=["最新论文", "高引用研究", "开源项目/框架", "可落地架构"],
             llm_used=False,
         )
+
+    @staticmethod
+    def _query_topic(query: str) -> str:
+        clean_query = normalize_text(query) or query
+        english_terms = re.findall(r"[A-Za-z][A-Za-z0-9+.#/-]*(?:\s+[A-Za-z][A-Za-z0-9+.#/-]*)*", clean_query)
+        latin_topic = " ".join(term.strip() for term in english_terms if term.strip())
+        latin_topic = re.sub(r"\s+", " ", latin_topic).strip()
+        if latin_topic:
+            return f"{latin_topic} "
+        topic = re.sub(r"(请|帮我|帮忙|分析|研究|一下|怎么|如何|怎样|为什么|是否|能否|可以|吗|呢|？|\\?)", " ", clean_query)
+        topic = re.sub(r"\s+", " ", topic).strip(" ：:，,。；;")
+        return f"{topic or clean_query} "
 
 
 class OnlineDiscoveryAgent:
@@ -378,7 +430,7 @@ class SynthesisAgent:
         if "read:pdf" in joined:
             risks.append(f"{prefix} 为 PDF 文件，复杂排版或图表内容可能提取丢失")
         if not document.url.startswith(("http://", "https://", "doi:")):
-            risks.append(f"{prefix} 格式特殊，可能无法直接访问验证")
+            risks.append(f"{prefix} 未提供可直接打开的网页或 DOI 链接，系统只能按标题、摘要和来源信息交叉验证")
         try:
             year = int(str(document.published_at)[:4])
             if year and year < 2021:
@@ -395,9 +447,9 @@ class CriticAgent:
         risks: list[str] = []
         if not result.get("llm_used"):
             if result.get("llm_error"):
-                risks.append(f"大模型调用失败，已回退到本地合成器。真实报错：{result['llm_error']}")
+                risks.append(f"大模型调用失败，已回退到本地合成器。{result['llm_error']}")
             else:
-                risks.append("当前未检测到大模型 API Key，回答由本地确定性合成器生成；设置 KEYBOY_LLM_API_KEY 和 KEYBOY_LLM_MODEL 后会启用真实 LLM。")
+                risks.append("当前未配置远程大模型密钥，回答由本地确定性合成器生成；在模型面板配置后会启用真实远程大模型。")
         if len(citations) < 3:
             risks.append("证据数量不足，建议扩大在线源或增加子查询。")
         sources = {item.get("source") for item in citations}
@@ -423,9 +475,11 @@ class StrategyAgent:
         knowledge_map = self._knowledge_map(query, hits)
         decision_brief = {
             "user_need": self._infer_user_need(query),
+            "verdict": self._verdict(trust_score, citations, risks),
+            "evidence_basis": self._evidence_basis(citations, risks, bool(synth.get("llm_used"))),
             "recommended_path": self._recommended_path(query, plan, citations, trust_score),
             "why_keyboy": self._why_keyboy(trust_score, citations),
-            "tradeoffs": self._tradeoffs(query, citations),
+            "tradeoffs": self._tradeoffs(query, citations, risks, bool(synth.get("llm_used"))),
         }
         next_questions = self._next_questions(query, knowledge_map)
         payload = {
@@ -462,19 +516,38 @@ class StrategyAgent:
         trust_score: dict[str, Any],
     ) -> str:
         source_count = len({item.get("source") for item in citations if item.get("source")})
-        if any(term in query for term in ("最强", "特色", "为什么", "用户", "需求")):
-            return (
-                "把 KeyBoy 定位成“前沿项目雷达 + 可信研究决策工作台”：用户输入目标后，系统自动规划检索、"
-                "聚合在线证据、生成可引用结论、给出风险和下一步行动。核心卖点不是搜索框，而是把资料变成可执行决策。"
-            )
-        if "GraphRAG" in query or "LightRAG" in query:
-            return (
-                "以现有 Agentic Research 为主流程，优先补齐轻量知识地图和证据覆盖，再逐步扩展实体关系图谱、"
-                "网页正文阅读和多轮研究任务。这样能保持课程项目稳定，同时吸收 GraphRAG/LightRAG 的强项。"
-            )
         if source_count >= 2 and trust_score["score"] >= 70:
-            return "当前证据覆盖较稳，可以直接进入方案设计、技术选型或报告撰写阶段。"
-        return "先扩大资料源和子查询，再做最终选型；当前结论适合作为初稿，不适合直接当最终判断。"
+            return "可以把本次研究作为方案设计、技术选型或报告撰写的依据，但最终答辩前仍建议复查关键引用。"
+        if len(citations) >= 3:
+            return "适合作为研究初稿和课堂讲解材料；如果要形成最终判断，需要补充更多独立来源。"
+        return "当前更适合做探索性线索，不适合直接作为最终结论；建议扩大资料源或细化子查询后再决策。"
+
+    @staticmethod
+    def _verdict(trust_score: dict[str, Any], citations: list[dict[str, Any]], risks: list[str]) -> str:
+        score = trust_score.get("score", 0)
+        level = trust_score.get("level", "未知")
+        if score >= 75:
+            scope = "可用于支撑主要判断"
+        elif score >= 55:
+            scope = "可用于支撑初稿和课堂展示"
+        else:
+            scope = "只适合作为线索，不宜直接下最终结论"
+        if not citations:
+            return "暂未形成可复查证据，当前结果不能作为可信决策依据。"
+        if any("失败" in risk or "不足" in risk for risk in risks):
+            return f"可信度{level}（{score}分），{scope}；但仍存在来源或证据短板。"
+        return f"可信度{level}（{score}分），{scope}。"
+
+    @staticmethod
+    def _evidence_basis(citations: list[dict[str, Any]], risks: list[str], llm_used: bool) -> str:
+        source_count = len({item.get("source") for item in citations if item.get("source")})
+        strong_count = sum(1 for item in citations if item.get("support_level") == "强")
+        readable_count = sum(1 for item in citations if item.get("read_status") == "已读正文")
+        model_state = "远程大模型" if llm_used else "本地兜底模式"
+        return (
+            f"基于 {len(citations)} 条引用、{source_count} 类来源、{strong_count} 条强支持证据；"
+            f"{readable_count} 条证据已读取正文，模型状态为{model_state}，当前记录 {len(risks)} 条风险/校验意见。"
+        )
 
     @staticmethod
     def _why_keyboy(trust_score: dict[str, Any], citations: list[dict[str, Any]]) -> list[str]:
@@ -491,16 +564,18 @@ class StrategyAgent:
         return reasons
 
     @staticmethod
-    def _tradeoffs(query: str, citations: list[dict[str, Any]]) -> list[str]:
+    def _tradeoffs(query: str, citations: list[dict[str, Any]], risks: list[str], llm_used: bool) -> list[str]:
         source_count = len({item.get("source") for item in citations if item.get("source")})
         tradeoffs = [
-            "强功能与可维护性：优先做轻量知识地图、可信度和决策简报，避免一开始引入重型图数据库。",
-            "在线能力与现场稳定：在线源提升前沿性，本地 fallback 保证课堂和演示可复现。",
+            "速度与严谨度：当前结果适合快速形成判断；更严谨的最终结论需要继续补证和复核来源。",
+            "前沿性与可复现：在线来源提升新鲜度；课堂展示仍要保留本地兜底模式保证稳定。",
         ]
-        if any(term in query for term in ("GraphRAG", "LightRAG", "图谱", "关系")):
-            tradeoffs.append("图谱增强很有价值，但第一阶段应先做可解释概念图，后续再升级实体抽取和社区摘要。")
+        if not llm_used:
+            tradeoffs.append("模型能力与稳定性：本地兜底模式可复现，但语言质量和综合判断弱于真实远程大模型。")
         if source_count < 2:
-            tradeoffs.append("当前来源覆盖偏窄，最终结论需要更多独立来源交叉验证。")
+            tradeoffs.append("覆盖面与结论强度：来源类型偏少时，结论应降级为候选判断。")
+        if any("正文" in risk or "直接打开" in risk for risk in risks):
+            tradeoffs.append("可验证性与覆盖率：部分来源只能按摘要或元数据验证，引用时应说明证据强度。")
         return tradeoffs
 
     @staticmethod
@@ -534,7 +609,7 @@ class StrategyAgent:
                 {"name": "证据数量", "score": evidence_score, "max": 35, "detail": f"{len(citations)} 条引用证据"},
                 {"name": "来源多样性", "score": diversity_score, "max": 25, "detail": f"{source_count} 个来源"},
                 {"name": "资料新鲜度", "score": recency_score, "max": 20, "detail": f"{recent_ratio:.0%} 为 2024 年后资料"},
-                {"name": "模型状态", "score": model_score, "max": 10, "detail": "远程 LLM" if llm_used else "本地 fallback"},
+                {"name": "模型状态", "score": model_score, "max": 10, "detail": "远程大模型" if llm_used else "本地兜底模式"},
                 {"name": "风险扣分", "score": -risk_penalty, "max": 0, "detail": f"{len(risks)} 条风险/校验意见"},
             ],
         }
@@ -623,7 +698,7 @@ class EvaluatorAgent:
             if len(sources) >= 2 and len(hits) >= 3:
                 payload = {"sufficient": True, "new_subqueries": []}
             else:
-                payload = {"sufficient": False, "new_subqueries": [f"{query} supplementary review evidence"]}
+                payload = {"sufficient": False, "new_subqueries": [f"{ResearchPlannerAgent._query_topic(query)}补充综述与对比证据"]}
             return type("AgentResult", (), {"payload": payload, "trace_message": "启发式评估"})()
 
         context_snippets = "\n".join(
@@ -652,7 +727,7 @@ class EvaluatorAgent:
         except Exception:
             payload = {"sufficient": True, "new_subqueries": []}
 
-        return type("AgentResult", (), {"payload": payload, "trace_message": "LLM 证据评估"})()
+        return type("AgentResult", (), {"payload": payload, "trace_message": "大模型证据评估"})()
 
 
 @dataclass
@@ -798,26 +873,26 @@ class AgenticKeyBoySystem:
                     set_status("证据充足，准备合成最终答案。")
                     break
                 else:
-                    new_subs = eval_payload.get("new_subqueries", [])
+                    new_subs = ResearchPlannerAgent._normalize_subqueries(eval_payload.get("new_subqueries", []), [], query)
                     if not new_subs:
                         break
                     set_status(f"发现知识盲区，生成补充查询: {', '.join(new_subs)}")
                     plan.subqueries = new_subs
 
         check_cancel()
-        set_status("正在合成研究答案 (调用 LLM 需时较长)...")
+        set_status("正在合成研究答案（调用大模型时可能较慢）...")
         synth_result, trace = self.synthesis_agent.synthesize(query, hits, on_chunk=handle_chunk)
         append_trace(trace)
         check_cancel()
         synth = synth_result.payload if synth_result else {"answer": "", "citations": [], "findings": [], "llm_used": False, "model": ""}
 
-        set_status("正在进行批判与风险校验 (调用 LLM 需时较长)...")
+        set_status("正在进行批判与风险校验（调用大模型时可能较慢）...")
         critique_result, trace = self.critic_agent.critique(synth)
         append_trace(trace)
         check_cancel()
         risks = list(dict.fromkeys(all_warnings[:10] + (critique_result.payload if critique_result else [])))
 
-        set_status("正在生成最终研究简报 (调用 LLM 需时较长)...")
+        set_status("正在生成最终研究简报（调用大模型时可能较慢）...")
         strategy_result, trace = self.strategy_agent.advise(query, plan, hits, synth, risks)
         append_trace(trace)
         if trace.status == "error":
@@ -882,9 +957,11 @@ class AgenticKeyBoySystem:
         return {
             "decision_brief": {
                 "user_need": StrategyAgent._infer_user_need(query),
+                "verdict": StrategyAgent._verdict(trust_score, citations, risks),
+                "evidence_basis": StrategyAgent._evidence_basis(citations, risks, bool(synth.get("llm_used"))),
                 "recommended_path": StrategyAgent._recommended_path(query, plan, citations, trust_score),
                 "why_keyboy": StrategyAgent._why_keyboy(trust_score, citations),
-                "tradeoffs": StrategyAgent._tradeoffs(query, citations),
+                "tradeoffs": StrategyAgent._tradeoffs(query, citations, risks, bool(synth.get("llm_used"))),
             },
             "trust_score": trust_score,
             "knowledge_map": knowledge_map,

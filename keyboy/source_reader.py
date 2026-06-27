@@ -104,7 +104,12 @@ class SourceReader:
         except TimeoutError:
             return self._failed_report(doc, url, "来源读取超时")
         except Exception as exc:
-            return self._failed_report(doc, url, f"来源读取失败：{exc}")
+            return self._failed_report(
+                doc,
+                url,
+                "来源读取失败，已跳过该来源继续研究",
+                {"error_type": type(exc).__name__, "error": str(exc)},
+            )
 
     def _dispatch_read(self, url: str) -> SourceReadResult:
         if is_github_url(url):
@@ -113,7 +118,13 @@ class SourceReader:
             return read_pdf(url, timeout=self.timeout, user_agent=self.user_agent)
         return read_web_page(url, timeout=self.timeout, user_agent=self.user_agent)
 
-    def _failed_report(doc: SearchDocument, url: str, reason: str) -> dict[str, Any]:
+    @staticmethod
+    def _failed_report(
+        doc: SearchDocument,
+        url: str,
+        reason: str,
+        metadata: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
         prefix = f"《{doc.title}》" if doc.title else f"链接 {url}"
         return {
             "document_id": doc.id,
@@ -125,7 +136,7 @@ class SourceReader:
             "text": "",
             "length": 0,
             "risks": [f"{prefix} {reason}"],
-            "metadata": {},
+            "metadata": metadata or {},
         }
 
     @staticmethod

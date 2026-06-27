@@ -21,6 +21,8 @@ const state = {
   restoringHistory: false,
 };
 
+let historyMotionTimer = null;
+
 const $ = (selector) => document.querySelector(selector);
 const $$ = (selector) => Array.from(document.querySelectorAll(selector));
 
@@ -30,6 +32,7 @@ const nodes = {
   submit: $("#submitBtn"),
   online: $("#onlineToggle"),
   docCount: $("#docCount"),
+  localDocInput: $("#localDocInput"),
   modelState: $("#modelState"),
   results: $("#results"),
   dockContainer: $("#dockContainer"),
@@ -90,7 +93,7 @@ function setBusy(value) {
 function getCurrentConversationRunningIds() {
   const ids = [];
   for (const [id, run] of state.taskRuns) {
-    if (run.conversationId === state.currentConversationId && isChatVisible(run.chat)) {
+    if (run.conversationId === state.currentConversationId) {
       ids.push(id);
     }
   }
@@ -125,8 +128,94 @@ function dl(container, pairs) {
     const dt = document.createElement("dt");
     const dd = document.createElement("dd");
     dt.textContent = key;
-    dd.textContent = value ?? "-";
+    renderDlValue(dd, value);
     container.append(dt, dd);
+  });
+}
+
+function renderDlValue(container, value) {
+  if (Array.isArray(value)) {
+    const items = normalizeDlItems(value);
+    if (!items.length) {
+      container.textContent = "-";
+      return;
+    }
+    const list = document.createElement("ol");
+    list.className = "compact-dl-list";
+    items.forEach((item) => {
+      const li = document.createElement("li");
+      li.textContent = item;
+      list.appendChild(li);
+    });
+    container.appendChild(list);
+    return;
+  }
+  container.textContent = value ?? "-";
+}
+
+function normalizeDlItems(items) {
+  const seen = new Set();
+  return (items || [])
+    .map(item => String(item ?? "").replace(/\s+/g, " ").trim())
+    .filter(Boolean)
+    .filter(item => {
+      const key = item.toLowerCase();
+      if (seen.has(key)) return false;
+      seen.add(key);
+      return true;
+    })
+    .slice(0, 6);
+}
+
+function setHistoryPanelOpen(open) {
+  const panel = nodes.historyPanel;
+  const stage = $(".stage");
+  const openPadding = window.matchMedia("(max-width: 860px)").matches ? "14px" : "338px";
+  const nextFrame = (callback) => {
+    let applied = false;
+    const run = () => {
+      if (applied) return;
+      applied = true;
+      callback();
+    };
+    requestAnimationFrame(run);
+    setTimeout(run, 24);
+  };
+  clearTimeout(historyMotionTimer);
+  panel.style.transition = "transform 0.36s cubic-bezier(0.22, 1, 0.36, 1), opacity 0.28s ease";
+  stage.style.transition = "padding-left 0.36s cubic-bezier(0.22, 1, 0.36, 1), max-width 0.36s cubic-bezier(0.22, 1, 0.36, 1)";
+
+  if (open) {
+    panel.classList.remove("collapsed");
+    panel.classList.add("is-open");
+    panel.style.pointerEvents = "auto";
+    panel.style.transform = "translateX(calc(-100% - 28px)) scale(0.98)";
+    panel.style.opacity = "0";
+    stage.style.paddingLeft = "22px";
+    stage.style.maxWidth = "1380px";
+    panel.offsetHeight;
+    nextFrame(() => {
+      panel.style.transform = "translateX(0) scale(1)";
+      panel.style.opacity = "1";
+      stage.style.paddingLeft = openPadding;
+      stage.style.maxWidth = "1680px";
+    });
+    return;
+  }
+
+  panel.classList.remove("is-open");
+  panel.classList.add("collapsed");
+  panel.style.pointerEvents = "none";
+  panel.style.transform = "translateX(0) scale(1)";
+  panel.style.opacity = "1";
+  stage.style.paddingLeft = openPadding;
+  stage.style.maxWidth = "1680px";
+  panel.offsetHeight;
+  nextFrame(() => {
+    panel.style.transform = "translateX(calc(-100% - 28px)) scale(0.98)";
+    panel.style.opacity = "0";
+    stage.style.paddingLeft = "22px";
+    stage.style.maxWidth = "1380px";
   });
 }
 
@@ -460,9 +549,9 @@ function populateDrawers(payload) {
   const plan = payload.plan || {};
   dl(nodes.profile, [
     ["意图", plan.intent],
-    ["规划", plan.llm_used ? "远程 LLM" : "本地规划"],
-    ["子查询", (plan.subqueries || []).join(" | ")],
-    ["证据", (plan.required_evidence || []).join("、")],
+    ["规划", plan.llm_used ? "远程大模型" : "本地规划"],
+    ["检索拆解", plan.subqueries || []],
+    ["证据", plan.required_evidence || []],
   ]);
   const metrics = payload.metrics || {};
   const failedAgents = (metrics.failed_agents || []).map(item => `${item.name}: ${item.message}`).join("；");
@@ -471,20 +560,21 @@ function populateDrawers(payload) {
   const trustValue = trust.overall ?? trust.score ?? trust.total ?? "-";
   nodes.qualityBrief.innerHTML = `<h3>可信决策简报</h3><dl class="brief-dl"></dl>`;
   dl(nodes.qualityBrief.querySelector("dl"), [
-    ["用户意图", brief.user_need || "暂无"],
-    ["推荐路径", brief.recommended_path || "暂无"],
-    ["可信度", String(trustValue)],
-    ["取舍", brief.tradeoffs || brief.why_keyboy || "暂无"],
+    ["适用判断", brief.verdict || "暂无"],
+    ["证据依据", brief.evidence_basis || "暂无"],
+    ["可信度", trust.level ? `${trust.level}（${trustValue}）` : String(trustValue)],
+    ["使用建议", brief.recommended_path || "暂无"],
+    ["关键取舍", brief.tradeoffs || "暂无"],
   ]);
   dl(nodes.quality, [
-    ["模型", metrics.llm_used ? metrics.llm_model : "本地 fallback"],
+    ["模型", metrics.llm_used ? metrics.llm_model : "本地兜底模式"],
     ["在线文档", metrics.online_documents],
     ["正文读取", `${metrics.source_read_success ?? 0}/${metrics.source_read_attempted ?? 0}`],
     ["来源多样性", metrics.source_diversity ?? "-"],
     ["引用支持率", metrics.citation_support_rate != null ? `${Math.round(metrics.citation_support_rate * 100)}%` : "-"],
     ["索引文档", metrics.indexed_documents],
     ["结果", metrics.result_count],
-    ["失败 Agent", failedAgents || "无"],
+    ["失败智能体", failedAgents || "无"],
   ]);
 }
 
@@ -595,6 +685,84 @@ function isChatVisible(chat) {
   return Boolean(chat?.container && document.body.contains(chat.container));
 }
 
+function createTaskRun({ controller, chat, task = null, conversationId = null }) {
+  return {
+    controller,
+    chat,
+    task,
+    conversationId,
+    startedAt: Date.now(),
+    progress: {
+      statusText: "初始化研究流程...",
+      steps: [],
+      streamText: "",
+    },
+  };
+}
+
+function ensureRunProgress(run) {
+  if (!run.progress) {
+    run.progress = { statusText: "研究进行中", steps: [], streamText: "" };
+  }
+  if (!Array.isArray(run.progress.steps)) run.progress.steps = [];
+  return run.progress;
+}
+
+function renderProgressStep(chat, step, animate = false) {
+  if (!chat) return;
+  const message = typeof step === "string" ? step : step?.message;
+  if (!message) return;
+  const li = document.createElement("li");
+  if (animate) li.style.animation = "answerBlockIn 0.3s cubic-bezier(0.2, 0.8, 0.2, 1) forwards";
+  li.innerHTML = `<span class="step-mark">✓</span><span>${escapeHtml(message)}</span>`;
+  chat.progressSteps.appendChild(li);
+}
+
+function applyRunProgress(chat, run, task = null) {
+  if (!chat || !run) return;
+  const progress = ensureRunProgress(run);
+  const fallbackStatus = task?.status === "queued" ? "排队中" : "研究进行中";
+  chat.statusText.textContent = progress.statusText || fallbackStatus;
+  chat.progressSteps.innerHTML = "";
+  progress.steps.forEach((step) => renderProgressStep(chat, step));
+  chat.thinking.classList.remove("hidden");
+}
+
+function bindRunChat(run, chat, task = null) {
+  if (!run || !chat) return;
+  run.chat = chat;
+  if (task) run.task = task;
+  chat.task = run.task || task || chat.task;
+  applyRunProgress(chat, run, run.task || task);
+}
+
+function updateRunStatus(runId, statusText, options = {}) {
+  const run = state.taskRuns.get(runId);
+  if (!run) return null;
+  const progress = ensureRunProgress(run);
+  progress.statusText = statusText;
+  if (options.stepMessage) {
+    const lastStep = progress.steps[progress.steps.length - 1];
+    if (!lastStep || lastStep.message !== options.stepMessage) {
+      progress.steps.push({ message: options.stepMessage, at: Date.now() });
+    }
+  }
+  if (isChatVisible(run.chat)) {
+    run.chat.statusText.textContent = progress.statusText;
+    if (options.stepMessage) {
+      renderProgressStep(run.chat, { message: options.stepMessage }, true);
+    }
+  }
+  return run;
+}
+
+function fallbackRunningStatus(task) {
+  if (task.status === "queued") return "排队中";
+  const traces = task.result?.traces || [];
+  const latestTrace = traces[traces.length - 1];
+  return latestTrace?.message ? `${latestTrace.message}（已保存进度）` : "研究进行中";
+}
+
 function setCurrentConversation(conversation) {
   state.currentConversationId = conversation?.id || null;
   state.currentConversationTitle = conversation?.title || "";
@@ -641,7 +809,7 @@ async function runResearch(options = {}) {
 
   const tempId = "pending_" + Date.now();
   chat.container.dataset.taskId = tempId;
-  state.taskRuns.set(tempId, { controller, chat, task: null, conversationId: conversationId });
+  state.taskRuns.set(tempId, createTaskRun({ controller, chat, task: null, conversationId }));
   if (!state.currentConversationId) {
     nodes.activeProjectName.textContent = "新对话，发送后保存";
   }
@@ -725,9 +893,10 @@ async function runResearch(options = {}) {
                         state.taskRuns.delete(tempId);
                         run.task = task;
                         run.conversationId = task?.conversation_id || conversationId;
+                        bindRunChat(run, chat, task);
                         state.taskRuns.set(taskId, run);
                       } else {
-	                    state.taskRuns.set(taskId, { controller, chat, task, conversationId: task?.conversation_id || conversationId });
+	                    state.taskRuns.set(taskId, createTaskRun({ controller, chat, task, conversationId: task?.conversation_id || conversationId }));
                       }
 
 	                  refreshRunningUi();
@@ -735,22 +904,15 @@ async function runResearch(options = {}) {
 	                loadTasks();
 	              } else if (event.type === "status") {
 	                const elapsed = Math.floor((Date.now() - startTime) / 1000);
-	                const targetChat = taskId ? (state.taskRuns.get(taskId)?.chat || chat) : chat;
-	                if (isChatVisible(targetChat)) {
-	                  targetChat.statusText.textContent = `${event.message} · ${elapsed}s`;
-	                  const li = document.createElement("li");
-	                  li.style.animation = "answerBlockIn 0.3s cubic-bezier(0.2, 0.8, 0.2, 1) forwards";
-	                  li.innerHTML = `<span class="step-mark">✓</span><span>${escapeHtml(event.message)}</span>`;
-	                  targetChat.progressSteps.appendChild(li);
-	                }
+	                updateRunStatus(taskId || tempId, `${event.message} · ${elapsed}s`, { stepMessage: event.message });
 	              } else if (event.type === "chunk") {
                 textBuffer += event.chunk;
                 const lastLine = textBuffer.split("\n").filter(l => l.trim().length > 0).pop() || "";
                 const displayLine = lastLine.replace(/[#*`>{}\[\]]/g, "").trim();
 	                const shortDisplay = displayLine.length > 50 ? displayLine.substring(displayLine.length - 50) : displayLine;
-	                const targetChat = taskId ? (state.taskRuns.get(taskId)?.chat || chat) : chat;
-	                if (shortDisplay && isChatVisible(targetChat)) {
-	                  targetChat.statusText.textContent = `正在组织答案：${shortDisplay}`;
+	                if (shortDisplay) {
+	                  const run = updateRunStatus(taskId || tempId, `正在组织答案：${shortDisplay}`);
+	                  if (run) ensureRunProgress(run).streamText = textBuffer;
 	                }
               } else if (event.type === "complete") {
                 payload = event.result;
@@ -1024,14 +1186,23 @@ async function restoreConversation(conversationId) {
     state.activeTaskId = task.id;
     const run = state.taskRuns.get(task.id);
     if (run) {
-      run.chat = chat;
       run.task = task;
+      run.conversationId = task.conversation_id;
+      bindRunChat(run, chat, task);
       state.taskRuns.set(task.id, run);
     }
     const isActive = task.status === "running" || task.status === "queued";
     if (isActive) {
-      chat.statusText.textContent = task.status === "queued" ? "排队中" : "研究进行中";
-      chat.thinking.classList.remove("hidden");
+      if (run) {
+        applyRunProgress(chat, run, task);
+      } else {
+        chat.statusText.textContent = fallbackRunningStatus(task);
+        chat.progressSteps.innerHTML = "";
+        (task.result?.traces || []).forEach((trace) => {
+          renderProgressStep(chat, { message: `${trace.name}: ${trace.message}` });
+        });
+        chat.thinking.classList.remove("hidden");
+      }
     } else {
       const result = normalizeTaskResult(task);
       renderResearch(result, { task, chat, animate: false });
@@ -1097,7 +1268,7 @@ function renderModelState(config) {
     nodes.modelState.textContent = `远程模型 · ${config.model}`;
     nodes.modelMessage.textContent = `已配置 ${config.model}`;
   } else {
-    nodes.modelState.textContent = "本地 fallback";
+    nodes.modelState.textContent = "本地兜底模式";
     nodes.modelMessage.textContent = config.has_api_key ? "模型名未配置" : "未配置远程模型";
   }
   if (config.enabled || config.has_api_key) {
@@ -1221,14 +1392,66 @@ function hideDrawer() {
   nodes.drawerOverlay.classList.add("hidden");
 }
 
+function setLocalDocCount(count) {
+  nodes.docCount.textContent = `本地资料 ${count ?? "-"} 篇`;
+}
+
 async function loadHealth() {
   try {
     const response = await fetch("/api/health");
     const payload = await response.json();
     const stats = payload.stats || {};
-    nodes.docCount.textContent = `本地资料 ${stats.documents ?? "-"} 篇`;
+    setLocalDocCount(stats.documents);
     renderModelState(payload.llm);
   } catch (error) {}
+}
+
+async function uploadLocalDocuments() {
+  const files = Array.from(nodes.localDocInput?.files || []);
+  if (!files.length) return;
+
+  const previousLabel = nodes.docCount.textContent;
+  const payload = new FormData();
+  files.forEach((file) => payload.append("files", file));
+  nodes.docCount.disabled = true;
+  nodes.docCount.classList.remove("upload-ok", "upload-warn", "upload-error");
+  nodes.docCount.classList.add("uploading");
+  nodes.docCount.textContent = `正在上传 ${files.length} 篇...`;
+  nodes.docCount.title = "正在把本地资料加入索引";
+
+  try {
+    const response = await fetch("/api/local-documents", {
+      method: "POST",
+      body: payload,
+    });
+    const result = await response.json().catch(() => ({}));
+    if (!response.ok) {
+      throw new Error(result.detail || "上传失败。");
+    }
+    const skipped = result.skipped || [];
+    const added = Number(result.added || 0);
+    nodes.docCount.classList.add(added > 0 ? "upload-ok" : "upload-warn");
+    nodes.docCount.textContent = added > 0 ? `已加入 ${added} 篇` : "未加入新资料";
+    nodes.docCount.title = skipped.length
+      ? `已加入 ${added} 篇，跳过 ${skipped.length} 个文件：${skipped.map(item => `${item.file}：${item.reason}`).join("；")}`
+      : `已加入 ${added} 篇本地资料`;
+    setTimeout(() => {
+      nodes.docCount.classList.remove("upload-ok", "upload-warn");
+      loadHealth();
+    }, 1200);
+  } catch (error) {
+    nodes.docCount.classList.add("upload-error");
+    nodes.docCount.textContent = "上传失败";
+    nodes.docCount.title = error.message || "上传失败，请检查文件格式。";
+    setTimeout(() => {
+      nodes.docCount.classList.remove("upload-error");
+      nodes.docCount.textContent = previousLabel;
+    }, 1600);
+  } finally {
+    nodes.docCount.classList.remove("uploading");
+    nodes.docCount.disabled = false;
+    nodes.localDocInput.value = "";
+  }
 }
 
 async function loadSources() {
@@ -1269,11 +1492,17 @@ nodes.online.addEventListener("change", () => {
   // Toggle doesn't need to show status text anymore
 });
 
+nodes.docCount.addEventListener("click", () => nodes.localDocInput.click());
+nodes.localDocInput.addEventListener("change", uploadLocalDocuments);
 nodes.provider.addEventListener("change", applyProviderDefaults);
 nodes.saveModel.addEventListener("click", saveModelConfig);
 nodes.saveSources.addEventListener("click", saveSourceConfig);
-nodes.historyToggle.addEventListener("click", () => nodes.historyPanel.classList.toggle("collapsed"));
-nodes.historyCollapse.addEventListener("click", () => nodes.historyPanel.classList.add("collapsed"));
+nodes.historyToggle.addEventListener("click", () => setHistoryPanelOpen(!nodes.historyPanel.classList.contains("is-open")));
+nodes.historyCollapse.addEventListener("click", () => setHistoryPanelOpen(false));
+window.addEventListener("resize", () => {
+  if (!nodes.historyPanel.classList.contains("is-open")) return;
+  $(".stage").style.paddingLeft = window.matchMedia("(max-width: 860px)").matches ? "14px" : "338px";
+});
 nodes.newConversation.addEventListener("click", newConversation);
 nodes.archiveToggle.addEventListener("click", async () => {
   state.showArchived = !state.showArchived;

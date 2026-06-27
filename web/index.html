@@ -4,7 +4,7 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>KeyBoy 智能专业搜索引擎</title>
-    <link rel="stylesheet" href="/style.css?v=20260622-conversations6" />
+    <link rel="stylesheet" href="/style.css?v=20260625-run-progress1" />
   </head>
   <body>
     <div class="scene-bg">
@@ -62,8 +62,9 @@
             <span>在线资料</span>
             <span class="toggle-slider"></span>
           </label>
-          <span id="docCount" class="pill">本地资料 - 篇</span>
-          <span id="modelState" class="pill">本地 fallback</span>
+          <button id="docCount" type="button" class="pill local-doc-btn" title="上传 txt/md/csv/json/html 本地资料">本地资料 - 篇</button>
+          <input id="localDocInput" class="hidden" type="file" multiple accept=".txt,.md,.markdown,.csv,.json,.html,.htm,text/plain,text/markdown,text/csv,application/json,text/html" />
+          <span id="modelState" class="pill">本地兜底模式</span>
           <button type="button" class="ghost-btn" data-drawer="model">模型</button>
         </div>
       </header>
@@ -226,6 +227,6 @@
       </aside>
     </div>
 
-    <script src="/app.js?v=20260622-conversations6"></script>
+    <script src="/app.js?v=20260625-run-progress1"></script>
   </body>
 </html>

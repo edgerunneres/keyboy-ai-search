@@ -14,9 +14,9 @@ METRIC_DEFINITIONS = [
     {"id": "source_count", "name": "来源数量", "method": "引用证据条数"},
     {"id": "source_diversity", "name": "来源多样性", "method": "引用来源去重数量"},
     {"id": "body_read", "name": "是否读取正文", "method": "source_read_success 是否大于 0"},
-    {"id": "failure", "name": "失败率", "method": "任务是否 failed 或存在失败 Agent"},
+    {"id": "failure", "name": "失败率", "method": "任务是否失败或存在失败智能体"},
     {"id": "latency_ms", "name": "总耗时", "method": "后端 metrics.latency_ms"},
-    {"id": "model_cost", "name": "模型成本", "method": "本地 fallback 记为 0，远程模型以平台账单为准"},
+    {"id": "model_cost", "name": "模型成本", "method": "本地兜底模式记为 0，远程模型以平台账单为准"},
 ]
 
 

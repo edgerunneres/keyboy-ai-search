@@ -1,24 +1,30 @@
 from __future__ import annotations
 
 import argparse
+from datetime import date
+import html
 import json
 from pathlib import Path
 import queue
+import re
 import threading
 from typing import Any, Optional
 
 import uvicorn
+from fastapi import FastAPI, File, HTTPException, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import Response
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 from sse_starlette.sse import EventSourceResponse
-from fastapi import FastAPI, HTTPException
 
 from .agentic import AgenticKeyBoySystem, ResearchCancelled
 from .agents import KeyBoySystem
 from .eval_suite import METRIC_DEFINITIONS, load_eval_tasks
+from .models import SearchDocument, stable_id
+from .storage import load_documents, save_documents
 from .task_store import TaskStore
+from .text import fingerprint, normalize_text
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -26,6 +32,10 @@ WEB_ROOT = ROOT / "web"
 SYSTEM = KeyBoySystem()
 AGENTIC_SYSTEM = AgenticKeyBoySystem()
 TASK_STORE = TaskStore()
+DOCUMENT_LOCK = threading.Lock()
+MAX_UPLOAD_FILES = 20
+MAX_UPLOAD_BYTES = 1_500_000
+SUPPORTED_UPLOAD_SUFFIXES = {".txt", ".md", ".markdown", ".csv", ".json", ".html", ".htm"}
 
 app = FastAPI()
 
@@ -119,6 +129,60 @@ def task_payload_from_config(task: dict[str, Any]) -> TaskPayload:
         limit=int(source_config.get("limit", 8) or 8),
         origin_task_id=task.get("origin_task_id"),
     )
+
+
+def _decode_uploaded_text(filename: str, raw: bytes) -> tuple[str, str]:
+    suffix = Path(filename).suffix.lower()
+    if suffix not in SUPPORTED_UPLOAD_SUFFIXES:
+        return "", "当前只支持 txt、md、csv、json、html 文本资料，PDF/Word 暂未解析。"
+    if len(raw) > MAX_UPLOAD_BYTES:
+        return "", "文件超过 1.5MB，已跳过。"
+    for encoding in ("utf-8-sig", "utf-8", "gb18030"):
+        try:
+            text = raw.decode(encoding)
+            break
+        except UnicodeDecodeError:
+            text = ""
+    if not text:
+        return "", "文件编码无法识别，建议另存为 UTF-8 文本后再上传。"
+    if suffix == ".json":
+        try:
+            text = json.dumps(json.loads(text), ensure_ascii=False, indent=2)
+        except json.JSONDecodeError:
+            pass
+    if suffix in {".html", ".htm"}:
+        text = re.sub(r"<(script|style)[^>]*>.*?</\1>", " ", text, flags=re.IGNORECASE | re.DOTALL)
+        text = re.sub(r"<[^>]+>", " ", text)
+        text = html.unescape(text)
+    text = normalize_text(text)
+    if len(text) < 60:
+        return "", "可索引正文不足 60 字，已跳过。"
+    return text, ""
+
+
+def _uploaded_document(filename: str, content: str) -> SearchDocument:
+    safe_name = Path(filename).name or "未命名资料.txt"
+    suffix = Path(safe_name).suffix.lower().lstrip(".") or "text"
+    title = normalize_text(Path(safe_name).stem.replace("_", " ").replace("-", " ")) or safe_name
+    content_id = stable_id(title, content[:2000])
+    return SearchDocument.from_dict(
+        {
+            "title": title,
+            "content": content,
+            "url": f"local-upload://{content_id}/{safe_name}",
+            "source": "用户上传",
+            "published_at": date.today().isoformat(),
+            "category": "用户资料",
+            "tags": ["用户上传", suffix],
+        }
+    )
+
+
+def _document_stats(count: int) -> dict[str, Any]:
+    stats = {"documents": count}
+    if SYSTEM.index is not None:
+        stats.update(SYSTEM.index.stats())
+    return stats
 
 
 def task_result_envelope(task: dict[str, Any]) -> dict[str, Any]:
@@ -311,6 +375,54 @@ def post_sources_config(config: Optional[SourcesConfig] = None):
         per_source_limit=parse_int(config.per_source_limit),
     )
     return {"status": "ok", "sources": AGENTIC_SYSTEM.discovery_agent.client.safe_config()}
+
+
+@app.post("/api/local-documents")
+async def post_local_documents(files: list[UploadFile] = File(...)):
+    if not files:
+        raise HTTPException(status_code=400, detail="请至少选择一个本地资料文件。")
+
+    skipped: list[dict[str, str]] = []
+    candidates: list[SearchDocument] = []
+    for index, upload in enumerate(files):
+        filename = Path(upload.filename or f"本地资料-{index + 1}.txt").name
+        if index >= MAX_UPLOAD_FILES:
+            skipped.append({"file": filename, "reason": f"一次最多上传 {MAX_UPLOAD_FILES} 个文件。"})
+            await upload.close()
+            continue
+        raw = await upload.read()
+        await upload.close()
+        content, reason = _decode_uploaded_text(filename, raw)
+        if reason:
+            skipped.append({"file": filename, "reason": reason})
+            continue
+        candidates.append(_uploaded_document(filename, content))
+
+    with DOCUMENT_LOCK:
+        documents = load_documents()
+        existing_ids = {doc.id for doc in documents}
+        existing_content = {fingerprint(f"{doc.title}\n{doc.content[:2000]}") for doc in documents}
+        added: list[SearchDocument] = []
+        for doc in candidates:
+            content_key = fingerprint(f"{doc.title}\n{doc.content[:2000]}")
+            if doc.id in existing_ids or content_key in existing_content:
+                skipped.append({"file": doc.title, "reason": "同名同内容资料已存在，已跳过。"})
+                continue
+            documents.append(doc)
+            added.append(doc)
+            existing_ids.add(doc.id)
+            existing_content.add(content_key)
+        if added:
+            save_documents(documents)
+            SYSTEM.bootstrap()
+
+    return {
+        "status": "ok",
+        "added": len(added),
+        "skipped": skipped,
+        "stats": _document_stats(len(documents)),
+        "documents": [{"id": doc.id, "title": doc.title, "source": doc.source} for doc in added],
+    }
 
 
 @app.get("/api/projects")
